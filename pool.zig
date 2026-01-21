@@ -238,7 +238,6 @@ pub const ThreadPool = struct {
         }
     }
 
-
     /// Pop an injected job (called by workers).
     fn popInjectedJob(self: *ThreadPool) ?*InjectedJob {
         while (true) {

@@ -383,14 +383,30 @@ test "Scope - spawn with many tasks" {
             s.spawn(setFlag7);
         }
 
-        fn setFlag0() void { test_flags[0].store(true, .release); }
-        fn setFlag1() void { test_flags[1].store(true, .release); }
-        fn setFlag2() void { test_flags[2].store(true, .release); }
-        fn setFlag3() void { test_flags[3].store(true, .release); }
-        fn setFlag4() void { test_flags[4].store(true, .release); }
-        fn setFlag5() void { test_flags[5].store(true, .release); }
-        fn setFlag6() void { test_flags[6].store(true, .release); }
-        fn setFlag7() void { test_flags[7].store(true, .release); }
+        fn setFlag0() void {
+            test_flags[0].store(true, .release);
+        }
+        fn setFlag1() void {
+            test_flags[1].store(true, .release);
+        }
+        fn setFlag2() void {
+            test_flags[2].store(true, .release);
+        }
+        fn setFlag3() void {
+            test_flags[3].store(true, .release);
+        }
+        fn setFlag4() void {
+            test_flags[4].store(true, .release);
+        }
+        fn setFlag5() void {
+            test_flags[5].store(true, .release);
+        }
+        fn setFlag6() void {
+            test_flags[6].store(true, .release);
+        }
+        fn setFlag7() void {
+            test_flags[7].store(true, .release);
+        }
     }.run);
 
     // All tasks should have executed

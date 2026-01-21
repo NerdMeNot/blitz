@@ -231,9 +231,9 @@ fn example3_sort_by_key() !void {
     print("  Time: {d:.2} ms\n", .{@as(f64, @floatFromInt(elapsed)) / 1_000_000.0});
     print("  Verified sorted by key: {}\n", .{is_sorted});
     print("  Sample: {} (key={}), {} (key={}), {} (key={})\n\n", .{
-        data[0],      @mod(data[0], 1000),
-        data[n / 2],  @mod(data[n / 2], 1000),
-        data[n - 1],  @mod(data[n - 1], 1000),
+        data[0],     @mod(data[0], 1000),
+        data[n / 2], @mod(data[n / 2], 1000),
+        data[n - 1], @mod(data[n - 1], 1000),
     });
 }
 

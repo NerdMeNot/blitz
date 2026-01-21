@@ -1743,7 +1743,7 @@ test "parallelFlatten - basic" {
 test "parallelFlatten - empty slices" {
     const slice0 = [_]u32{ 1, 2 };
     const slice1 = [_]u32{};
-    const slice2 = [_]u32{ 3 };
+    const slice2 = [_]u32{3};
 
     const slices = [_][]const u32{ &slice0, &slice1, &slice2 };
     var output: [3]u32 = undefined;

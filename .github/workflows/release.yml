@@ -48,10 +48,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read Zig version
+        id: zig-version
+        run: echo "version=$(cat .zig-version)" >> $GITHUB_OUTPUT
+
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: master
+          version: ${{ steps.zig-version.outputs.version }}
 
       - name: Run tests
         run: zig test mod.zig -lc
@@ -69,10 +73,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Read Zig version
+        id: zig-version
+        run: echo "version=$(cat .zig-version)" >> $GITHUB_OUTPUT
+
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: master
+          version: ${{ steps.zig-version.outputs.version }}
 
       - name: Update version in build.zig.zon
         run: |

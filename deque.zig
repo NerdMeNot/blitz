@@ -226,7 +226,7 @@ pub fn Deque(comptime T: type) type {
         /// Uses adaptive backoff to reduce cache coherency traffic under contention.
         pub fn stealLoop(self: *Self) ?T {
             var backoff: u32 = 0;
-            const SPIN_LIMIT: u32 = 6;  // ~64 spins max
+            const SPIN_LIMIT: u32 = 6; // ~64 spins max
 
             while (true) {
                 const result = self.steal();
