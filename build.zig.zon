@@ -1,0 +1,40 @@
+.{
+    .name = .blitz,
+    .version = "1.0.0",
+    .minimum_zig_version = "0.15.0",
+
+    // Package metadata
+    .fingerprint = 0xe8a54ff463aed812,
+
+    // Files to include in the package
+    .paths = .{
+        "api.zig",
+        "mod.zig",
+        "pool.zig",
+        "worker.zig",
+        "deque.zig",
+        "future.zig",
+        "job.zig",
+        "latch.zig",
+        "scope.zig",
+        "sync.zig",
+        "algorithms.zig",
+        "sort",
+        "iter",
+        "simd",
+        "internal",
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+        "BENCHMARKS.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "Makefile",
+        ".gitignore",
+        ".github",
+    },
+
+    // No external dependencies
+    .dependencies = .{},
+}
