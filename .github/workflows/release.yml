@@ -85,20 +85,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit version bump
+      - name: Commit version bump (if changed)
         run: |
           git add build.zig.zon
-          git commit -m "Release v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}"
+          if ! git diff --staged --quiet; then
+            git commit -m "Release v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}"
+            git push origin main
+          fi
 
-      - name: Create tag
+      - name: Create and push tag
         run: |
           TAG="v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}"
           git tag -a "$TAG" -m "Release $TAG"
-
-      - name: Push changes
-        run: |
-          git push origin main
-          git push origin "v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}"
+          git push origin "$TAG"
 
       - name: Generate release notes
         id: notes
