@@ -21,10 +21,18 @@ Add Blitz to your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .blitz = .{
-        // Option 1: Git URL with tag (recommended)
-        .url = "git+https://github.com/NerdMeNot/blitz.git#v1.0.0-zig0.15",
+        // Option 1: Release archive (recommended)
+        .url = "https://github.com/NerdMeNot/blitz/archive/refs/tags/v1.0.0-zig0.15.2.tar.gz",
         .hash = "...", // Run `zig build` and it will tell you the hash
     },
+},
+```
+
+Or use a git URL with tag:
+```zig
+.blitz = .{
+    .url = "git+https://github.com/NerdMeNot/blitz.git#v1.0.0-zig0.15.2",
+    .hash = "...",
 },
 ```
 
