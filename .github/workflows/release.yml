@@ -143,7 +143,7 @@ jobs:
           EOF
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}-zig${{ inputs.zig_version }}
           name: Blitz v${{ inputs.version }} (Zig ${{ inputs.zig_version }}+)
