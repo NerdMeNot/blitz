@@ -7,11 +7,6 @@ on:
         description: 'Version to release (e.g., 1.0.0)'
         required: true
         type: string
-      zig_version:
-        description: 'Minimum Zig version (e.g., 0.15)'
-        required: true
-        default: '0.15'
-        type: string
       prerelease:
         description: 'Mark as pre-release'
         required: false
@@ -21,8 +16,14 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      zig_version: ${{ steps.zig-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read Zig version
+        id: zig-version
+        run: echo "version=$(cat .zig-version)" >> $GITHUB_OUTPUT
 
       - name: Validate version format
         run: |
@@ -35,7 +36,7 @@ jobs:
 
       - name: Check tag doesn't exist
         run: |
-          TAG="v${{ inputs.version }}-zig${{ inputs.zig_version }}"
+          TAG="v${{ inputs.version }}-zig${{ steps.zig-version.outputs.version }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Error: Tag $TAG already exists"
             exit 1
@@ -48,14 +49,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read Zig version
-        id: zig-version
-        run: echo "version=$(cat .zig-version)" >> $GITHUB_OUTPUT
-
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: ${{ steps.zig-version.outputs.version }}
+          version: ${{ needs.validate.outputs.zig_version }}
 
       - name: Run tests
         run: zig test mod.zig -lc
@@ -64,7 +61,7 @@ jobs:
         run: zig build
 
   release:
-    needs: test
+    needs: [validate, test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -73,14 +70,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Read Zig version
-        id: zig-version
-        run: echo "version=$(cat .zig-version)" >> $GITHUB_OUTPUT
-
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: ${{ steps.zig-version.outputs.version }}
+          version: ${{ needs.validate.outputs.zig_version }}
 
       - name: Update version in build.zig.zon
         run: |
@@ -95,17 +88,17 @@ jobs:
       - name: Commit version bump
         run: |
           git add build.zig.zon
-          git commit -m "Release v${{ inputs.version }}-zig${{ inputs.zig_version }}"
+          git commit -m "Release v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}"
 
       - name: Create tag
         run: |
-          TAG="v${{ inputs.version }}-zig${{ inputs.zig_version }}"
+          TAG="v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}"
           git tag -a "$TAG" -m "Release $TAG"
 
       - name: Push changes
         run: |
           git push origin main
-          git push origin "v${{ inputs.version }}-zig${{ inputs.zig_version }}"
+          git push origin "v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}"
 
       - name: Generate release notes
         id: notes
@@ -116,7 +109,7 @@ jobs:
           High-performance parallel runtime for Zig.
 
           ### Requirements
-          - **Zig**: ${{ inputs.zig_version }}.0 or later
+          - **Zig**: ${{ needs.validate.outputs.zig_version }} or compatible
           - **OS**: Linux, macOS, Windows
 
           ### Installation
@@ -126,7 +119,7 @@ jobs:
           ```zig
           .dependencies = .{
               .blitz = .{
-                  .url = "https://github.com/${{ github.repository }}/archive/v${{ inputs.version }}-zig${{ inputs.zig_version }}.tar.gz",
+                  .url = "https://github.com/${{ github.repository }}/archive/v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}.tar.gz",
                   .hash = "...", // Run zig build to get the hash
               },
           },
@@ -147,14 +140,14 @@ jobs:
           See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
 
           ---
-          **Full Changelog**: https://github.com/${{ github.repository }}/compare/...v${{ inputs.version }}-zig${{ inputs.zig_version }}
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/...v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}
           EOF
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ inputs.version }}-zig${{ inputs.zig_version }}
-          name: Blitz v${{ inputs.version }} (Zig ${{ inputs.zig_version }}+)
+          tag_name: v${{ inputs.version }}-zig${{ needs.validate.outputs.zig_version }}
+          name: Blitz v${{ inputs.version }} (Zig ${{ needs.validate.outputs.zig_version }})
           body_path: release_notes.md
           prerelease: ${{ inputs.prerelease }}
           generate_release_notes: true
