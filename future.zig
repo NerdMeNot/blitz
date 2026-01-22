@@ -204,13 +204,13 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
                 }
 
                 // Exponential backoff spin (1, 2, 4, 8, 16, 32, 64 spins)
+                // NOTE: We check latch AFTER spinning, not during each spin.
+                // This reduces atomic operations from O(spins) to O(1) per backoff level.
+                // The while loop condition already checks the latch each iteration.
                 if (spin_backoff < SPIN_LIMIT) {
                     const spins = @as(u32, 1) << @intCast(spin_backoff);
                     for (0..spins) |_| {
                         std.atomic.spinLoopHint();
-                        if (self.latch.probe()) {
-                            return self.result;
-                        }
                     }
                     spin_backoff += 1;
                 } else {

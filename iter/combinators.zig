@@ -180,8 +180,12 @@ pub fn ZipIter(comptime A: type, comptime B: type) type {
 
             api.parallelFor(n, Context, ctx, struct {
                 fn body(c: Context, start: usize, end: usize) void {
-                    for (start..end) |i| {
-                        func(c.a[i], c.b[i]);
+                    // Slice both arrays once, then iterate in lockstep
+                    // This allows the compiler to optimize bounds checks
+                    const slice_a = c.a[start..end];
+                    const slice_b = c.b[start..end];
+                    for (slice_a, slice_b) |a_item, b_item| {
+                        func(a_item, b_item);
                     }
                 }
             }.body);
@@ -296,8 +300,12 @@ pub fn ZipIter(comptime A: type, comptime B: type) type {
 
             api.parallelFor(n, Context, ctx, struct {
                 fn body(c: Context, start: usize, end: usize) void {
-                    for (start..end) |i| {
-                        c.out[i] = .{ c.a[i], c.b[i] };
+                    // Slice all arrays once for better cache locality
+                    const slice_a = c.a[start..end];
+                    const slice_b = c.b[start..end];
+                    const out_slice = c.out[start..end];
+                    for (slice_a, slice_b, out_slice) |a_item, b_item, *out| {
+                        out.* = .{ a_item, b_item };
                     }
                 }
             }.body);

@@ -34,8 +34,13 @@ pub fn EnumerateIter(comptime T: type) type {
                 .base = self.offset,
             }, struct {
                 fn body(ctx: Context, start: usize, end: usize) void {
-                    for (start..end) |i| {
-                        func(ctx.base + i, ctx.slice[i]);
+                    // Pre-compute base index to avoid addition per iteration
+                    // Compiler can strength-reduce idx increment to a simple add
+                    const slice = ctx.slice[start..end];
+                    var idx = ctx.base + start;
+                    for (slice) |item| {
+                        func(idx, item);
+                        idx += 1;
                     }
                 }
             }.body);
@@ -57,6 +62,8 @@ pub fn EnumerateIter(comptime T: type) type {
                 Context,
                 .{ .slice = self.data, .base = self.offset },
                 struct {
+                    // Note: parallelReduce calls this per-element, so ctx.base + i
+                    // is unavoidable here. The real fix would be batch-based reduce.
                     fn mapFn(ctx: Context, i: usize) R {
                         return map_fn(ctx.base + i, ctx.slice[i]);
                     }
@@ -171,8 +178,11 @@ pub fn EnumerateMutIter(comptime T: type) type {
                 .base = self.offset,
             }, struct {
                 fn body(ctx: Context, start: usize, end: usize) void {
-                    for (start..end) |i| {
-                        func(ctx.base + i, &ctx.slice[i]);
+                    // Pre-compute base index to avoid addition per iteration
+                    var idx = ctx.base + start;
+                    for (ctx.slice[start..end]) |*item| {
+                        func(idx, item);
+                        idx += 1;
                     }
                 }
             }.body);
@@ -192,8 +202,11 @@ pub fn EnumerateMutIter(comptime T: type) type {
                 .base = self.offset,
             }, struct {
                 fn body(ctx: Context, start: usize, end: usize) void {
-                    for (start..end) |i| {
-                        ctx.slice[i] = func(ctx.base + i, ctx.slice[i]);
+                    // Pre-compute base index to avoid addition per iteration
+                    var idx = ctx.base + start;
+                    for (ctx.slice[start..end]) |*item| {
+                        item.* = func(idx, item.*);
+                        idx += 1;
                     }
                 }
             }.body);

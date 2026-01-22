@@ -97,19 +97,33 @@ pub fn partialInsertionSort(comptime T: type, v: []T, comptime is_less: fn (T, T
     const len = v.len;
 
     // SIMD fast path: for large arrays of SIMD-friendly types, use vectorized check
-    // This is ~4-8x faster than scalar loop for already-sorted data
+    // This is ~4-8x faster than scalar loop for already-sorted data.
+    // BUT: Only run SIMD check if the data appears likely sorted (first 8 elements in order).
+    // This avoids wasting cycles on random data where SIMD check will certainly fail.
     if (len >= 1024 and simd_check.canSimdCheck(T)) {
-        // Check if data is sorted using SIMD
-        // is_less(a, b) means a < b, so !is_less(v[i], v[i-1]) means v[i] >= v[i-1]
-        // which is equivalent to checking v[i-1] <= v[i] for ascending order
-        const is_ordered = struct {
-            fn check(a: T, b: T) bool {
-                return !is_less(b, a); // a <= b if !(b < a)
+        // Quick heuristic: check if first 8 elements are sorted before doing full SIMD scan
+        const sample_size = @min(8, len - 1);
+        var appears_sorted = true;
+        for (0..sample_size) |i| {
+            if (is_less(v[i + 1], v[i])) {
+                appears_sorted = false;
+                break;
             }
-        }.check;
+        }
 
-        if (simd_check.isSorted(T, v, is_ordered)) {
-            return true;
+        if (appears_sorted) {
+            // Check if data is sorted using SIMD
+            // is_less(a, b) means a < b, so !is_less(v[i], v[i-1]) means v[i] >= v[i-1]
+            // which is equivalent to checking v[i-1] <= v[i] for ascending order
+            const is_ordered = struct {
+                fn check(a: T, b: T) bool {
+                    return !is_less(b, a); // a <= b if !(b < a)
+                }
+            }.check;
+
+            if (simd_check.isSorted(T, v, is_ordered)) {
+                return true;
+            }
         }
         // Not sorted - fall through to standard algorithm which may still fix it
     }

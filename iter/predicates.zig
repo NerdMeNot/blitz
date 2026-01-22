@@ -42,14 +42,23 @@ pub fn any(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
             // Early exit if already found
             if (ctx.found.load(.monotonic)) return;
 
-            for (ctx.slice[start..end]) |item| {
-                // Check periodically for faster response
-                if (ctx.found.load(.monotonic)) return;
+            // Check atomic flag every CHUNK_SIZE elements instead of every element.
+            // This reduces atomic operations from O(n) to O(n/CHUNK_SIZE).
+            const CHUNK_SIZE = 64;
+            const slice = ctx.slice[start..end];
+            var i: usize = 0;
 
-                if (pred(item)) {
-                    ctx.found.store(true, .release);
-                    return;
+            while (i < slice.len) {
+                // Process a chunk without atomic checks
+                const chunk_end = @min(i + CHUNK_SIZE, slice.len);
+                while (i < chunk_end) : (i += 1) {
+                    if (pred(slice[i])) {
+                        ctx.found.store(true, .release);
+                        return;
+                    }
                 }
+                // Check if another thread found a match (once per chunk)
+                if (ctx.found.load(.monotonic)) return;
             }
         }
     }.body, &found);
@@ -90,14 +99,23 @@ pub fn all(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
             // Early exit if already failed
             if (ctx.failed.load(.monotonic)) return;
 
-            for (ctx.slice[start..end]) |item| {
-                // Check periodically for faster response
-                if (ctx.failed.load(.monotonic)) return;
+            // Check atomic flag every CHUNK_SIZE elements instead of every element.
+            // This reduces atomic operations from O(n) to O(n/CHUNK_SIZE).
+            const CHUNK_SIZE = 64;
+            const slice = ctx.slice[start..end];
+            var i: usize = 0;
 
-                if (!pred(item)) {
-                    ctx.failed.store(true, .release);
-                    return;
+            while (i < slice.len) {
+                // Process a chunk without atomic checks
+                const chunk_end = @min(i + CHUNK_SIZE, slice.len);
+                while (i < chunk_end) : (i += 1) {
+                    if (!pred(slice[i])) {
+                        ctx.failed.store(true, .release);
+                        return;
+                    }
                 }
+                // Check if another thread found a counter-example (once per chunk)
+                if (ctx.failed.load(.monotonic)) return;
             }
         }
     }.body, &failed);
