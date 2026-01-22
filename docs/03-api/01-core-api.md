@@ -602,9 +602,14 @@ const result = blitz.join(.{
 
 **Parameters**: Anonymous struct where each field is either:
 - A function pointer (no arguments)
-- A tuple `.{ function, argument }`
+- A tuple `.{ function, arg1, arg2, ... }` (up to 10 arguments)
 
 **Returns**: Struct with same field names, containing each task's return value.
+
+**Limitations**:
+- Maximum **10 arguments** per task (compile error if exceeded)
+- For functions needing more arguments, wrap them in a struct
+- This limit exists because some arguments may be comptime types (like `type`), which require manual enumeration in Zig
 
 **Example - Parallel data fetching**:
 ```zig
@@ -648,6 +653,23 @@ fn parallelSum(data: []const i64) i64 {
 - Always have a sequential base case for recursive algorithms
 - Threshold should be large enough that parallel overhead is negligible (~1000+ elements)
 - Tasks should have similar workloads for best load balancing
+
+**Workaround for >10 arguments**:
+```zig
+// Instead of 11+ separate arguments, use a struct:
+const Args = struct {
+    a: i32, b: i32, c: i32, d: i32,
+    e: i32, f: i32, g: i32, h: i32,
+};
+
+fn processMany(args: Args) Result {
+    // Use args.a, args.b, etc.
+}
+
+const result = blitz.join(.{
+    .task = .{ processMany, Args{ .a = 1, .b = 2, ... } },
+});
+```
 
 ### `tryJoin(RetA, RetB, E, fnA, fnB, argA, argB) !struct { a: RetA, b: RetB }`
 

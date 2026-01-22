@@ -153,32 +153,35 @@ Solution: CAS on top to break tie.
 
 Lock-free: may fail but makes progress system-wide.
 
+Returns a struct with result enum (success/empty/retry) and optional item:
+
 ```zig
-pub fn steal(self: *Self) ?T {
-    // Load top first
-    var t = self.top.load(.acquire);
+pub const StealResult = enum { empty, success, retry };
 
-    // Memory fence: ensure we see items before bottom
-    @fence(.seq_cst);
+pub fn steal(self: *Self) struct { result: StealResult, item: ?T } {
+    // Load top first with acquire
+    const t = self.top.load(.acquire);
 
-    // Load bottom
+    // Load bottom with acquire to see owner's operations
     const b = self.bottom.load(.acquire);
 
     if (t >= b) {
         // Deque is empty
-        return null;
+        return .{ .result = .empty, .item = null };
     }
 
-    // Read the item
-    const item = self.buffer[@intCast(t) & self.mask];
+    // Speculatively read the item
+    const idx = @as(usize, @intCast(t)) & self.mask;
+    const item = self.buffer[idx];
 
-    // Try to claim it with CAS
-    if (self.top.cmpxchgStrong(t, t + 1, .seq_cst, .relaxed)) |_| {
-        // Another stealer got it, retry
-        return null;  // Or loop to retry
+    // Try to claim by incrementing top with CAS
+    if (self.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic)) |_| {
+        // Lost the race - another thief got it or owner popped
+        return .{ .result = .retry, .item = null };
     }
 
-    return item;
+    // Success!
+    return .{ .result = .success, .item = item };
 }
 ```
 

@@ -255,6 +255,8 @@ test "blitz - all modules compile" {
     _ = @import("iter/mod.zig");
     _ = @import("simd/mod.zig");
     _ = @import("sort/mod.zig");
+    // Stress tests
+    _ = @import("stress_tests.zig");
 }
 
 test "blitz - basic parallel for" {

@@ -380,6 +380,10 @@ fn executeTaskByIndex(
 
 /// Execute a single task value (handles bare functions and tuples with args).
 /// Works with runtime task values.
+///
+/// Note: Supports up to 10 arguments. This manual enumeration is required because
+/// some arguments may be comptime types (like `type`), which can't be stored in
+/// runtime variables or handled dynamically with @call.
 fn executeTaskValue(task_val: anytype) TaskReturnType(@TypeOf(task_val)) {
     const FieldType = @TypeOf(task_val);
     const field_info = @typeInfo(FieldType);
@@ -401,8 +405,16 @@ fn executeTaskValue(task_val: anytype) TaskReturnType(@TypeOf(task_val)) {
             return task_val[0](task_val[1], task_val[2], task_val[3], task_val[4], task_val[5]);
         } else if (num_args == 6) {
             return task_val[0](task_val[1], task_val[2], task_val[3], task_val[4], task_val[5], task_val[6]);
+        } else if (num_args == 7) {
+            return task_val[0](task_val[1], task_val[2], task_val[3], task_val[4], task_val[5], task_val[6], task_val[7]);
+        } else if (num_args == 8) {
+            return task_val[0](task_val[1], task_val[2], task_val[3], task_val[4], task_val[5], task_val[6], task_val[7], task_val[8]);
+        } else if (num_args == 9) {
+            return task_val[0](task_val[1], task_val[2], task_val[3], task_val[4], task_val[5], task_val[6], task_val[7], task_val[8], task_val[9]);
+        } else if (num_args == 10) {
+            return task_val[0](task_val[1], task_val[2], task_val[3], task_val[4], task_val[5], task_val[6], task_val[7], task_val[8], task_val[9], task_val[10]);
         } else {
-            @compileError("join supports up to 6 arguments per task");
+            @compileError("join supports up to 10 arguments per task. For more arguments, wrap them in a struct.");
         }
     } else {
         // Bare function pointer (no args)

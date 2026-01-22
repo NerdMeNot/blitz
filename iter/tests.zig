@@ -107,6 +107,62 @@ test "ParIter - rposition" {
     try std.testing.expectEqual(@as(?usize, 4), result);
 }
 
+test "ParIter - positionAny" {
+    const data = [_]i64{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    const result = iter(i64, &data).positionAny(struct {
+        fn pred(x: i64) bool {
+            return x > 5;
+        }
+    }.pred);
+    // positionAny returns any matching index, not necessarily the first
+    try std.testing.expect(result != null);
+    try std.testing.expect(data[result.?] > 5);
+}
+
+test "ParIter - positionAny not found" {
+    const data = [_]i64{ 1, 2, 3, 4, 5 };
+    const result = iter(i64, &data).positionAny(struct {
+        fn pred(x: i64) bool {
+            return x > 100;
+        }
+    }.pred);
+    try std.testing.expectEqual(@as(?usize, null), result);
+}
+
+test "ParIter - any" {
+    const data = [_]i64{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    const has_even = iter(i64, &data).any(struct {
+        fn pred(x: i64) bool {
+            return @mod(x, 2) == 0;
+        }
+    }.pred);
+    try std.testing.expect(has_even);
+
+    const has_negative = iter(i64, &data).any(struct {
+        fn pred(x: i64) bool {
+            return x < 0;
+        }
+    }.pred);
+    try std.testing.expect(!has_negative);
+}
+
+test "ParIter - all" {
+    const data = [_]i64{ 2, 4, 6, 8, 10 };
+    const all_even = iter(i64, &data).all(struct {
+        fn pred(x: i64) bool {
+            return @mod(x, 2) == 0;
+        }
+    }.pred);
+    try std.testing.expect(all_even);
+
+    const all_less_than_5 = iter(i64, &data).all(struct {
+        fn pred(x: i64) bool {
+            return x < 5;
+        }
+    }.pred);
+    try std.testing.expect(!all_less_than_5);
+}
+
 test "ParIter - minBy" {
     const data = [_]i64{ 5, 2, 8, 1, 9, 3 };
     const result = iter(i64, &data).minBy(struct {

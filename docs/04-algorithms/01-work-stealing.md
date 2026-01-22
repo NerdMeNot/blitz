@@ -175,22 +175,26 @@ pub fn Deque(comptime T: type) type {
         }
 
         // Thief: steal from top (may fail)
-        pub fn steal(self: *@This()) ?T {
-            var t = self.top.load(.acquire);
+        // Returns struct with result enum and optional item
+        pub fn steal(self: *@This()) struct { result: StealResult, item: ?T } {
+            const t = self.top.load(.acquire);
             const b = self.bottom.load(.acquire);
 
-            if (t >= b) return null;  // Empty
+            if (t >= b) return .{ .result = .empty, .item = null };
 
             const item = self.buffer[@intCast(t)];
 
             // CAS to claim the item
-            if (self.top.cmpxchgStrong(t, t + 1, .seq_cst, .relaxed)) |_| {
-                return null;  // Another thief got it
+            if (self.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic)) |_| {
+                return .{ .result = .retry, .item = null };  // Lost race
             }
-            return item;
+            return .{ .result = .success, .item = item };
         }
     };
 }
+
+// StealResult enum for steal operations
+pub const StealResult = enum { empty, success, retry };
 ```
 
 ### Progressive Sleep (from `pool.zig`)
