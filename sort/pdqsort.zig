@@ -65,29 +65,57 @@ pub fn partitionInBlocks(comptime T: type, v: []T, pivot: *const T, comptime is_
             }
         }
 
-        // Trace left block
+        // Trace left block - unrolled 4x for better pipelining
         if (start_l == end_l) {
             start_l = 0;
             end_l = 0;
 
+            const piv = pivot.*;
             var i: u8 = 0;
-            while (i < @as(u8, @intCast(block_l))) : (i += 1) {
-                // Branchless: store offset if element >= pivot
+            const block_l_u8: u8 = @intCast(block_l);
+
+            // Unrolled loop: process 4 elements at a time
+            while (i + 4 <= block_l_u8) : (i += 4) {
                 offsets_l[end_l] = i;
-                end_l += @intFromBool(!is_less(v[l + i], pivot.*));
+                end_l += @intFromBool(!is_less(v[l + i], piv));
+                offsets_l[end_l] = i + 1;
+                end_l += @intFromBool(!is_less(v[l + i + 1], piv));
+                offsets_l[end_l] = i + 2;
+                end_l += @intFromBool(!is_less(v[l + i + 2], piv));
+                offsets_l[end_l] = i + 3;
+                end_l += @intFromBool(!is_less(v[l + i + 3], piv));
+            }
+            // Handle remaining elements
+            while (i < block_l_u8) : (i += 1) {
+                offsets_l[end_l] = i;
+                end_l += @intFromBool(!is_less(v[l + i], piv));
             }
         }
 
-        // Trace right block
+        // Trace right block - unrolled 4x for better pipelining
         if (start_r == end_r) {
             start_r = 0;
             end_r = 0;
 
+            const piv = pivot.*;
             var i: u8 = 0;
-            while (i < @as(u8, @intCast(block_r))) : (i += 1) {
-                // Branchless: store offset if element < pivot
+            const block_r_u8: u8 = @intCast(block_r);
+
+            // Unrolled loop: process 4 elements at a time
+            while (i + 4 <= block_r_u8) : (i += 4) {
                 offsets_r[end_r] = i;
-                end_r += @intFromBool(is_less(v[r - 1 - i], pivot.*));
+                end_r += @intFromBool(is_less(v[r - 1 - i], piv));
+                offsets_r[end_r] = i + 1;
+                end_r += @intFromBool(is_less(v[r - 2 - i], piv));
+                offsets_r[end_r] = i + 2;
+                end_r += @intFromBool(is_less(v[r - 3 - i], piv));
+                offsets_r[end_r] = i + 3;
+                end_r += @intFromBool(is_less(v[r - 4 - i], piv));
+            }
+            // Handle remaining elements
+            while (i < block_r_u8) : (i += 1) {
+                offsets_r[end_r] = i;
+                end_r += @intFromBool(is_less(v[r - 1 - i], piv));
             }
         }
 

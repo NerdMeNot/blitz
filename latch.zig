@@ -289,8 +289,8 @@ pub const CountLatch = struct {
         var spinner = SpinWait{};
 
         while (true) {
-            const state = self.state.load(.acquire);
-            const count = state & COUNT_MASK;
+            var state = self.state.load(.acquire);
+            var count = state & COUNT_MASK;
 
             if (count == 0) return;
 
@@ -299,15 +299,24 @@ pub const CountLatch = struct {
                 continue;
             }
 
-            // Set waiter bit
+            // Set waiter bit and get current state in one operation
             if ((state & WAITER_BIT) == 0) {
-                _ = self.state.cmpxchgWeak(state, state | WAITER_BIT, .acq_rel, .acquire);
+                if (self.state.cmpxchgWeak(state, state | WAITER_BIT, .acq_rel, .acquire)) |failed_state| {
+                    // CAS failed - use the current state we observed
+                    state = failed_state;
+                    count = state & COUNT_MASK;
+                    if (count == 0) return;
+                } else {
+                    // CAS succeeded - state now has waiter bit set
+                    state = state | WAITER_BIT;
+                }
             }
 
-            const current = self.state.load(.acquire);
-            if ((current & COUNT_MASK) == 0) return;
+            // Check count one more time before sleeping
+            count = state & COUNT_MASK;
+            if (count == 0) return;
 
-            Futex.wait(&self.state, current);
+            Futex.wait(&self.state, state);
         }
     }
 };

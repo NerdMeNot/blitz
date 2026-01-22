@@ -36,15 +36,14 @@ pub fn findAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T
     }
 
     // Parallel scan with atomic early exit + result storage
+    // Uses lock-free pattern: only CAS winner writes to result
     var found = std.atomic.Value(bool).init(false);
     var result: T = undefined;
-    var result_lock: std.Thread.Mutex = .{};
 
     const Context = struct {
         slice: []const T,
         found: *std.atomic.Value(bool),
         result: *T,
-        result_lock: *std.Thread.Mutex,
     };
 
     // Use parallelForWithEarlyExit to prune subtrees when found
@@ -52,7 +51,6 @@ pub fn findAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T
         .slice = data,
         .found = &found,
         .result = &result,
-        .result_lock = &result_lock,
     }, struct {
         fn body(ctx: Context, start: usize, end: usize) void {
             // Early exit check at start of each chunk
@@ -63,11 +61,9 @@ pub fn findAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T
                 if (ctx.found.load(.monotonic)) return;
 
                 if (pred(item)) {
-                    ctx.result_lock.lock();
-                    defer ctx.result_lock.unlock();
-                    if (!ctx.found.load(.monotonic)) {
+                    // Lock-free: only CAS winner writes result
+                    if (ctx.found.cmpxchgStrong(false, true, .release, .monotonic) == null) {
                         ctx.result.* = item;
-                        ctx.found.store(true, .release);
                     }
                     return;
                 }
@@ -128,11 +124,18 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
                 if (i >= ctx.best_pos.load(.monotonic)) return;
 
                 if (pred(ctx.slice[i])) {
-                    // Try to update best position using CAS
+                    // Try to update best position using CAS (with backoff)
                     var expected = ctx.best_pos.load(.monotonic);
+                    var backoff: u32 = 0;
                     while (i < expected) {
                         if (ctx.best_pos.cmpxchgWeak(expected, i, .release, .monotonic)) |old| {
                             expected = old;
+                            // Exponential backoff on CAS failure
+                            const spins = @as(u32, 1) << @intCast(@min(backoff, 6));
+                            for (0..spins) |_| {
+                                std.atomic.spinLoopHint();
+                            }
+                            backoff +|= 1;
                         } else {
                             // Success - update value
                             ctx.value_lock.lock();
@@ -252,15 +255,14 @@ pub fn positionAny(comptime T: type, data: []const T, comptime pred: fn (T) bool
     }
 
     // Parallel scan with atomic early exit + result storage
+    // Uses lock-free pattern: only CAS winner writes to result
     var found = std.atomic.Value(bool).init(false);
     var result_index: usize = undefined;
-    var result_lock: std.Thread.Mutex = .{};
 
     const Context = struct {
         slice: []const T,
         found: *std.atomic.Value(bool),
         result_index: *usize,
-        result_lock: *std.Thread.Mutex,
     };
 
     // Use parallelForWithEarlyExit to prune subtrees when found
@@ -268,7 +270,6 @@ pub fn positionAny(comptime T: type, data: []const T, comptime pred: fn (T) bool
         .slice = data,
         .found = &found,
         .result_index = &result_index,
-        .result_lock = &result_lock,
     }, struct {
         fn body(ctx: Context, start: usize, end: usize) void {
             // Early exit check at start of each chunk
@@ -279,11 +280,9 @@ pub fn positionAny(comptime T: type, data: []const T, comptime pred: fn (T) bool
                 if (ctx.found.load(.monotonic)) return;
 
                 if (pred(ctx.slice[i])) {
-                    ctx.result_lock.lock();
-                    defer ctx.result_lock.unlock();
-                    if (!ctx.found.load(.monotonic)) {
+                    // Lock-free: only CAS winner writes result
+                    if (ctx.found.cmpxchgStrong(false, true, .release, .monotonic) == null) {
                         ctx.result_index.* = i;
-                        ctx.found.store(true, .release);
                     }
                     return;
                 }

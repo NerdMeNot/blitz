@@ -389,11 +389,18 @@ pub fn parallelFind(comptime T: type, data: []const T, comptime pred: fn (T) boo
                 if (i >= ctx.earliest.load(.monotonic)) return;
 
                 if (pred(ctx.slice[i])) {
-                    // Atomically update if we're earlier
+                    // Atomically update if we're earlier (with backoff)
                     var current = ctx.earliest.load(.monotonic);
+                    var backoff: u32 = 0;
                     while (i < current) {
                         if (ctx.earliest.cmpxchgWeak(current, i, .monotonic, .monotonic)) |new_val| {
                             current = new_val;
+                            // Exponential backoff on CAS failure
+                            const spins = @as(u32, 1) << @intCast(@min(backoff, 6));
+                            for (0..spins) |_| {
+                                std.atomic.spinLoopHint();
+                            }
+                            backoff +|= 1;
                         } else {
                             break;
                         }
@@ -445,11 +452,18 @@ pub fn parallelFindValue(comptime T: type, data: []const T, value: T) ?usize {
                 if (i >= ctx.earliest.load(.monotonic)) return;
 
                 if (ctx.slice[i] == ctx.target) {
-                    // Atomically update if we're earlier
+                    // Atomically update if we're earlier (with backoff)
                     var current = ctx.earliest.load(.monotonic);
+                    var backoff: u32 = 0;
                     while (i < current) {
                         if (ctx.earliest.cmpxchgWeak(current, i, .monotonic, .monotonic)) |new_val| {
                             current = new_val;
+                            // Exponential backoff on CAS failure
+                            const spins = @as(u32, 1) << @intCast(@min(backoff, 6));
+                            for (0..spins) |_| {
+                                std.atomic.spinLoopHint();
+                            }
+                            backoff +|= 1;
                         } else {
                             break;
                         }

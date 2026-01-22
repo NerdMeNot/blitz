@@ -1,7 +1,9 @@
-//! SIMD-optimized Partition Tracing
+//! SIMD-optimized Block Tracing for Partition
 //!
 //! Uses SIMD to compare multiple elements to pivot at once,
-//! building offset arrays ~4x faster than scalar code.
+//! building offset arrays faster than scalar code for numeric types.
+//!
+//! Designed to integrate with BlockQuicksort partitioning.
 
 const std = @import("std");
 
@@ -25,18 +27,21 @@ pub fn canSimdPartition(comptime T: type) bool {
     };
 }
 
-/// Trace left block using SIMD - find elements >= pivot
+/// Trace left block using SIMD - find elements >= pivot (i.e., !is_less(elem, pivot))
+/// Works on a block starting at data[0..block_len]
 /// Returns number of offsets written (elements that need to move right)
-pub fn traceLeftSimd(
+///
+/// For ascending sort: finds elements >= pivot
+pub fn traceBlockLeftSimd(
     comptime T: type,
     data: []const T,
+    block_len: usize,
     pivot: T,
-    offsets: []u8,
+    offsets: *[128]u8,
 ) usize {
     const vec_len = comptime vectorLen(T);
     const Vec = @Vector(vec_len, T);
 
-    const len = data.len;
     var end: usize = 0;
     var i: usize = 0;
 
@@ -44,23 +49,21 @@ pub fn traceLeftSimd(
     const pivot_vec: Vec = @splat(pivot);
 
     // SIMD loop - process vec_len elements at a time
-    const simd_end = len -| vec_len;
-    while (i <= simd_end) : (i += vec_len) {
+    while (i + vec_len <= block_len) : (i += vec_len) {
         // Load vec_len elements
         const vals: Vec = data[i..][0..vec_len].*;
 
-        // Compare: find elements >= pivot (i.e., NOT less than pivot)
-        // vals >= pivot means !(vals < pivot)
+        // Compare: find elements >= pivot (NOT less than pivot)
+        // For ascending sort with is_less = (a < b), we want !(elem < pivot) i.e., elem >= pivot
         const lt_mask = vals < pivot_vec;
 
-        // Extract mask bits and invert (we want >= pivot)
+        // Invert mask to get elements >= pivot
         const ge_mask = ~@as(std.meta.Int(.unsigned, vec_len), @bitCast(lt_mask));
 
-        // For each bit set in ge_mask, store the offset
+        // For each bit set, store the offset
         var mask = ge_mask;
-        var j: u8 = 0;
-        while (mask != 0) : (j += 1) {
-            const bit_pos = @ctz(mask);
+        while (mask != 0) {
+            const bit_pos: u8 = @intCast(@ctz(mask));
             offsets[end] = @as(u8, @intCast(i)) + bit_pos;
             end += 1;
             mask &= mask - 1; // Clear lowest set bit
@@ -68,8 +71,8 @@ pub fn traceLeftSimd(
     }
 
     // Scalar tail
-    while (i < len) : (i += 1) {
-        if (data[i] >= pivot) {
+    while (i < block_len) : (i += 1) {
+        if (!(data[i] < pivot)) { // elem >= pivot
             offsets[end] = @intCast(i);
             end += 1;
         }
@@ -79,13 +82,15 @@ pub fn traceLeftSimd(
 }
 
 /// Trace right block using SIMD - find elements < pivot
-/// Data is accessed in reverse order (from end towards start)
+/// Works on a block ending at data[data.len - block_len .. data.len]
+/// Offsets are relative to the END: offset 0 = last element, offset 1 = second-to-last, etc.
 /// Returns number of offsets written (elements that need to move left)
-pub fn traceRightSimd(
+pub fn traceBlockRightSimd(
     comptime T: type,
     data: []const T,
+    block_len: usize,
     pivot: T,
-    offsets: []u8,
+    offsets: *[128]u8,
 ) usize {
     const vec_len = comptime vectorLen(T);
     const Vec = @Vector(vec_len, T);
@@ -97,14 +102,12 @@ pub fn traceRightSimd(
     // Broadcast pivot to vector
     const pivot_vec: Vec = @splat(pivot);
 
-    // Process from the end in reverse
-    // We compare data[len-1-i] for i = 0, 1, 2, ...
-    const simd_end = len -| vec_len;
-    while (i <= simd_end) : (i += vec_len) {
-        // Load vec_len elements from the end (in forward order, then we'll adjust offsets)
-        // Actually, we need to compare data[len-1-i], data[len-2-i], ...
-        // Let's load data[len-vec_len-i .. len-i] and reverse the mask interpretation
-
+    // Process from the end, comparing elements at data[len-1-i]
+    // SIMD processes vec_len elements at a time
+    while (i + vec_len <= block_len) : (i += vec_len) {
+        // Load vec_len elements ending at position (len - 1 - i)
+        // We want elements at indices: len-1-i, len-2-i, ..., len-vec_len-i
+        // Load forward starting at len-vec_len-i
         const start_idx = len - vec_len - i;
         const vals: Vec = data[start_idx..][0..vec_len].*;
 
@@ -112,32 +115,21 @@ pub fn traceRightSimd(
         const lt_mask = vals < pivot_vec;
         const mask_bits = @as(std.meta.Int(.unsigned, vec_len), @bitCast(lt_mask));
 
-        // The mask is for positions [start_idx, start_idx+vec_len)
-        // But we're iterating from the end, so offset 0 corresponds to data[len-1-0] = data[len-1]
-        // We need to map: if vals[j] < pivot, then offset = (len-1) - (start_idx + j) - ...
-        // This is getting complex. Let's do a simpler approach for right block.
-
-        // For each element in the SIMD window that's < pivot, compute its "reverse offset"
+        // For each matching element, compute its reverse offset
         var mask = mask_bits;
         while (mask != 0) {
-            const bit_pos = @ctz(mask);
+            const bit_pos: usize = @ctz(mask);
             // Element at data[start_idx + bit_pos] is < pivot
-            // Its reverse index from end is: (len - 1) - (start_idx + bit_pos)
-            const rev_idx = (len - 1) - (start_idx + bit_pos);
-            // But we're building offsets for the right side where offset i means data[r - 1 - i]
-            // So we want: i such that r - 1 - i = start_idx + bit_pos
-            // where r is the original right boundary. But we're tracing within [0, len)
-            // Actually, for the right trace, offset i means "the i-th element from the right"
-            // So offset 0 = data[len-1], offset 1 = data[len-2], etc.
-            // For data[start_idx + bit_pos], the offset is (len - 1) - (start_idx + bit_pos)
-            offsets[end] = @intCast(rev_idx);
+            // Its reverse offset (from end) is: (len - 1) - (start_idx + bit_pos)
+            const rev_offset = (len - 1) - (start_idx + bit_pos);
+            offsets[end] = @intCast(rev_offset);
             end += 1;
             mask &= mask - 1;
         }
     }
 
     // Scalar tail - process remaining elements from the end
-    while (i < len) : (i += 1) {
+    while (i < block_len) : (i += 1) {
         if (data[len - 1 - i] < pivot) {
             offsets[end] = @intCast(i);
             end += 1;
@@ -151,39 +143,65 @@ pub fn traceRightSimd(
 // Tests
 // ============================================================================
 
-test "traceLeftSimd - basic" {
+test "traceBlockLeftSimd - basic f64" {
     const data = [_]f64{ 1.0, 5.0, 2.0, 7.0, 3.0, 8.0, 4.0, 9.0 };
-    var offsets: [8]u8 = undefined;
+    var offsets: [128]u8 = undefined;
 
-    const count = traceLeftSimd(f64, &data, 5.0, &offsets);
+    const count = traceBlockLeftSimd(f64, &data, 8, 5.0, &offsets);
 
     // Elements >= 5.0: 5.0(1), 7.0(3), 8.0(5), 9.0(7) = 4 elements
     try std.testing.expectEqual(@as(usize, 4), count);
+    try std.testing.expectEqual(@as(u8, 1), offsets[0]);
+    try std.testing.expectEqual(@as(u8, 3), offsets[1]);
+    try std.testing.expectEqual(@as(u8, 5), offsets[2]);
+    try std.testing.expectEqual(@as(u8, 7), offsets[3]);
 }
 
-test "traceLeftSimd - all less" {
+test "traceBlockLeftSimd - all less" {
     const data = [_]f64{ 1.0, 2.0, 3.0, 4.0 };
-    var offsets: [4]u8 = undefined;
+    var offsets: [128]u8 = undefined;
 
-    const count = traceLeftSimd(f64, &data, 10.0, &offsets);
+    const count = traceBlockLeftSimd(f64, &data, 4, 10.0, &offsets);
     try std.testing.expectEqual(@as(usize, 0), count);
 }
 
-test "traceLeftSimd - all greater" {
+test "traceBlockLeftSimd - all greater or equal" {
     const data = [_]f64{ 10.0, 20.0, 30.0, 40.0 };
-    var offsets: [4]u8 = undefined;
+    var offsets: [128]u8 = undefined;
 
-    const count = traceLeftSimd(f64, &data, 5.0, &offsets);
+    const count = traceBlockLeftSimd(f64, &data, 4, 5.0, &offsets);
     try std.testing.expectEqual(@as(usize, 4), count);
 }
 
-test "traceRightSimd - basic" {
+test "traceBlockRightSimd - basic f64" {
     const data = [_]f64{ 1.0, 5.0, 2.0, 7.0, 3.0, 8.0, 4.0, 9.0 };
-    var offsets: [8]u8 = undefined;
+    var offsets: [128]u8 = undefined;
 
-    const count = traceRightSimd(f64, &data, 5.0, &offsets);
+    const count = traceBlockRightSimd(f64, &data, 8, 5.0, &offsets);
 
     // Elements < 5.0: 1.0(0), 2.0(2), 3.0(4), 4.0(6) = 4 elements
-    // From right: 4.0 is at index 6 = offset 1 from right (len-1-6 = 1)
+    // From right: indices 0,2,4,6 -> reverse offsets 7,5,3,1
     try std.testing.expectEqual(@as(usize, 4), count);
+}
+
+test "traceBlockLeftSimd - i32" {
+    const data = [_]i32{ 1, 5, 2, 7, 3, 8, 4, 9 };
+    var offsets: [128]u8 = undefined;
+
+    const count = traceBlockLeftSimd(i32, &data, 8, 5, &offsets);
+
+    // Elements >= 5: 5(1), 7(3), 8(5), 9(7) = 4 elements
+    try std.testing.expectEqual(@as(usize, 4), count);
+}
+
+test "traceBlockLeftSimd - partial block" {
+    const data = [_]f64{ 1.0, 5.0, 2.0, 7.0, 3.0 };
+    var offsets: [128]u8 = undefined;
+
+    // Only trace first 3 elements
+    const count = traceBlockLeftSimd(f64, &data, 3, 4.0, &offsets);
+
+    // Elements >= 4.0 in first 3: 5.0(1) = 1 element
+    try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqual(@as(u8, 1), offsets[0]);
 }

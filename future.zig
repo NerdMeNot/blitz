@@ -178,6 +178,9 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
             }
 
             // Work-stealing loop for when job was stolen but not yet complete
+            var spin_backoff: u32 = 0;
+            const SPIN_LIMIT: u32 = 6; // Max ~64 spins before yield
+
             while (!self.latch.probe()) {
                 // Try our deque
                 if (worker.pop()) |popped_job| {
@@ -187,6 +190,7 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
                     if (popped_job.handler) |handler| {
                         handler(task, popped_job);
                     }
+                    spin_backoff = 0; // Reset backoff on successful work
                     continue;
                 }
 
@@ -195,18 +199,24 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
                     if (stolen_job.handler) |handler| {
                         handler(task, stolen_job);
                     }
+                    spin_backoff = 0; // Reset backoff on successful work
                     continue;
                 }
 
-                // Spin briefly
-                for (0..32) |_| {
-                    std.atomic.spinLoopHint();
-                    if (self.latch.probe()) {
-                        return self.result;
+                // Exponential backoff spin (1, 2, 4, 8, 16, 32, 64 spins)
+                if (spin_backoff < SPIN_LIMIT) {
+                    const spins = @as(u32, 1) << @intCast(spin_backoff);
+                    for (0..spins) |_| {
+                        std.atomic.spinLoopHint();
+                        if (self.latch.probe()) {
+                            return self.result;
+                        }
                     }
+                    spin_backoff += 1;
+                } else {
+                    // Heavy wait - yield to OS
+                    std.Thread.yield() catch {};
                 }
-
-                std.Thread.yield() catch {};
             }
 
             return self.result;

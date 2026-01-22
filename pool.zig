@@ -183,7 +183,8 @@ pub const ThreadPool = struct {
             .result = undefined,
         };
 
-        // Push to injected jobs stack (lock-free)
+        // Push to injected jobs stack (lock-free with backoff)
+        var push_backoff: u32 = 0;
         while (true) {
             const head_raw = self.injected_jobs.load(.acquire);
             const head = TaggedPtr.fromU64(head_raw);
@@ -192,6 +193,12 @@ pub const ThreadPool = struct {
             if (self.injected_jobs.cmpxchgWeak(head_raw, new_head.toU64(), .release, .acquire) == null) {
                 break;
             }
+            // Exponential backoff on CAS failure
+            const spins = @as(u32, 1) << @intCast(@min(push_backoff, 6));
+            for (0..spins) |_| {
+                std.atomic.spinLoopHint();
+            }
+            push_backoff +|= 1;
         }
 
         // Wake a sleeping worker if any (lock-free!)
@@ -268,6 +275,7 @@ pub const ThreadPool = struct {
 
     /// Pop an injected job (called by workers).
     fn popInjectedJob(self: *ThreadPool) ?*InjectedJob {
+        var backoff: u32 = 0;
         while (true) {
             const head_raw = self.injected_jobs.load(.acquire);
             const head = TaggedPtr.fromU64(head_raw);
@@ -276,6 +284,12 @@ pub const ThreadPool = struct {
             if (self.injected_jobs.cmpxchgWeak(head_raw, new_head.toU64(), .release, .acquire) == null) {
                 return head_ptr;
             }
+            // Exponential backoff on CAS failure
+            const spins = @as(u32, 1) << @intCast(@min(backoff, 6));
+            for (0..spins) |_| {
+                std.atomic.spinLoopHint();
+            }
+            backoff +|= 1;
         }
     }
 };
@@ -445,13 +459,15 @@ fn executeJob(worker: *Worker, job: *Job) void {
 /// Follows Rayon's exact steal pattern:
 /// - Single-item stealing (not batch) for simplicity and reliability
 /// - Try each victim once per round
-/// - If any victim returned Retry (contention), do another round
+/// - If any victim returned Retry (contention), do another round with backoff
 /// - Stop when a job is found or all victims are Empty
 fn trySteal(pool: *ThreadPool, self_worker: *Worker) ?*Job {
     const num_workers = pool.num_workers;
     if (num_workers <= 1) return null;
 
     const start = self_worker.rng.nextBounded(num_workers);
+    var backoff: u32 = 0;
+    const BACKOFF_LIMIT: u32 = 6; // Max ~64 spins before yield
 
     // Rayon-style steal loop: single-item stealing with retry on contention
     while (true) {
@@ -478,7 +494,18 @@ fn trySteal(pool: *ThreadPool, self_worker: *Worker) ?*Job {
         if (!retry) {
             return null;
         }
-        // Otherwise loop and try all victims again
+
+        // Exponential backoff before retrying (reduces cache thrashing)
+        if (backoff < BACKOFF_LIMIT) {
+            const spins = @as(u32, 1) << @intCast(backoff);
+            for (0..spins) |_| {
+                std.atomic.spinLoopHint();
+            }
+            backoff += 1;
+        } else {
+            // Heavy contention - yield to OS
+            std.Thread.yield() catch {};
+        }
     }
 }
 
