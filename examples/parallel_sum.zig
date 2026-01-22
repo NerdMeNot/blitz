@@ -31,7 +31,7 @@ pub fn main() !void {
 
     // Parallel sum using Blitz iterator
     const par_start = std.time.nanoTimestamp();
-    const par_sum = blitz.iter_mod.iter(f64, data).sum();
+    const par_sum = blitz.iter(f64, data).sum();
     const par_time = std.time.nanoTimestamp() - par_start;
 
     // Results

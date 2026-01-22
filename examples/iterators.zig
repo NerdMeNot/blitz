@@ -73,7 +73,7 @@ fn example1_basic_iteration() !void {
     }
 
     // Create iterator
-    const it = blitz.iter_mod.iter(i64, data);
+    const it = blitz.iter(i64, data);
 
     // SIMD-optimized sum
     const start_sum = std.time.nanoTimestamp();
@@ -120,7 +120,7 @@ fn example2_find_operations() !void {
     data[1234567] = -1; // First negative
     data[8765432] = -2; // Last negative
 
-    const it = blitz.iter_mod.iter(i64, data);
+    const it = blitz.iter(i64, data);
 
     // findAny - returns any match (non-deterministic, fast)
     const isNegative = struct {
@@ -188,7 +188,7 @@ fn example3_predicates() !void {
         v.* = @intCast(i);
     }
 
-    const it = blitz.iter_mod.iter(i64, data);
+    const it = blitz.iter(i64, data);
 
     // any() - check if any element satisfies predicate
     const isLarge = struct {
@@ -256,7 +256,7 @@ fn example4_minmax_by_key() !void {
         .{ .name = "Eve", .age = 22, .score = 85 },
     };
 
-    const it = blitz.iter_mod.iter(Person, &people);
+    const it = blitz.iter(Person, &people);
 
     // minByKey - find person with lowest age
     const youngest = it.minByKey(u32, struct {
@@ -327,7 +327,7 @@ fn example5_chunks() !void {
         v.* = @floatFromInt(i);
     }
 
-    const it = blitz.iter_mod.iter(f64, data);
+    const it = blitz.iter(f64, data);
     const chunks_it = it.chunks_iter(chunk_size);
 
     // Count chunks
@@ -381,7 +381,7 @@ fn example6_enumerate() !void {
         v.* = @intCast(i * 2); // Even numbers
     }
 
-    const it = blitz.iter_mod.iter(i64, data);
+    const it = blitz.iter(i64, data);
     const enum_it = it.enumerate_iter();
 
     // Find first index where value != index * 2 (should find none)

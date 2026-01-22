@@ -1,73 +1,95 @@
 # Core API Reference
 
-The main Blitz API for parallel execution.
+## Iterator API (Recommended)
 
-## Initialization
+The iterator API is the simplest and most ergonomic way to use Blitz.
 
-### `init() !void`
-
-Initialize the thread pool with automatic configuration.
+### Creating Iterators
 
 ```zig
-try blitz.init();
-defer blitz.deinit();
+const blitz = @import("blitz");
+
+// From slice (immutable)
+const it = blitz.iter(T, slice);
+
+// From slice (mutable)
+const it = blitz.iterMut(T, slice);
+
+// From index range
+const it = blitz.range(start, end);
 ```
 
-### `initWithConfig(config: ThreadPoolConfig) !void`
-
-Initialize with custom configuration.
+### Aggregations
 
 ```zig
-try blitz.initWithConfig(.{
-    .background_worker_count = 8,
-});
+blitz.iter(i64, data).sum()              // Sum all elements
+blitz.iter(i64, data).min()              // Minimum (returns ?T)
+blitz.iter(i64, data).max()              // Maximum (returns ?T)
+blitz.iter(i64, data).reduce(0, addFn)   // Custom reduction
+blitz.iter(i64, data).count()            // Element count
 ```
 
-**ThreadPoolConfig fields:**
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `background_worker_count` | `?u32` | `null` (auto) | Number of background workers |
+### Search (with early exit)
 
-### `deinit() void`
+```zig
+blitz.iter(T, data).findAny(pred)        // Any match (fast, non-deterministic)
+blitz.iter(T, data).findFirst(pred)      // First match (leftmost)
+blitz.iter(T, data).findLast(pred)       // Last match (rightmost)
+blitz.iter(T, data).position(pred)       // Index of first match
+blitz.iter(T, data).positionAny(pred)    // Index of any match
+blitz.iter(T, data).rposition(pred)      // Index of last match
+```
 
-Shutdown the thread pool and join all workers.
+### Predicates (with early exit)
 
-### `isInitialized() bool`
+```zig
+blitz.iter(T, data).any(pred)            // True if any match
+blitz.iter(T, data).all(pred)            // True if all match
+```
 
-Check if pool is initialized.
+### Min/Max by Comparator or Key
 
-### `numWorkers() u32`
+```zig
+blitz.iter(T, data).minBy(comparator)    // Min by custom comparator
+blitz.iter(T, data).maxBy(comparator)    // Max by custom comparator
+blitz.iter(T, data).minByKey(K, keyFn)   // Min by key extraction
+blitz.iter(T, data).maxByKey(K, keyFn)   // Max by key extraction
+```
 
-Get total worker count (including main thread).
+### Mutation
+
+```zig
+blitz.iterMut(T, data).mapInPlace(fn)    // Transform each element
+blitz.iterMut(T, data).fill(value)       // Fill with value
+blitz.iterMut(T, data).forEach(fn)       // Execute for each
+```
+
+### Combinators
+
+```zig
+blitz.iter(T, a).chain(blitz.iter(T, b)) // Concatenate iterators
+blitz.iter(T, a).zip(blitz.iter(U, b))   // Pair elements
+blitz.iter(T, data).chunks_iter(size)    // Fixed-size chunks
+blitz.iter(T, data).enumerate_iter()     // With indices
+```
 
 ---
 
 ## Fork-Join
 
-### `join(RetA, RetB, fnA, fnB, argA, argB) [2]...`
+For divide-and-conquer algorithms.
 
-Execute two functions potentially in parallel.
+### `join(RetA, RetB, fnA, fnB, argA, argB)`
+
+Execute two functions in parallel, return both results.
 
 ```zig
-pub fn join(
-    comptime RetA: type,
-    comptime RetB: type,
-    comptime fnA: fn(ArgA) RetA,
-    comptime fnB: fn(ArgB) RetB,
-    argA: ArgA,
-    argB: ArgB,
-) [2]ReturnType
+const result = blitz.join(u64, u64, computeA, computeB, arg1, arg2);
+// result[0] = computeA(arg1)
+// result[1] = computeB(arg2)
 ```
 
-**Returns:** `[2]T` where `T` is `RetA` if `RetA == RetB`, else a tuple.
-
-**Example:**
-```zig
-const results = blitz.join(u64, u64, computeA, computeB, arg1, arg2);
-const total = results[0] + results[1];
-```
-
-### `joinVoid(fnA, fnB, argA, argB) void`
+### `joinVoid(fnA, fnB, argA, argB)`
 
 Execute two void functions in parallel.
 
@@ -75,75 +97,128 @@ Execute two void functions in parallel.
 blitz.joinVoid(processLeft, processRight, leftData, rightData);
 ```
 
----
+### `tryJoin(RetA, RetB, E, fnA, fnB, argA, argB)`
 
-## Parallel For
-
-### `parallelFor(n, Context, ctx, body) void`
-
-Execute body function over range `[0, n)` in parallel.
+Error-safe join. Task B always completes even if A fails.
 
 ```zig
-pub fn parallelFor(
-    n: usize,
-    comptime Context: type,
-    ctx: Context,
-    comptime body: fn(Context, usize, usize) void,
-) void
+const result = try blitz.tryJoin(u64, u64, MyError, fnA, fnB, argA, argB);
 ```
 
-**Parameters:**
-| Parameter | Description |
-|-----------|-------------|
-| `n` | Range size (processes indices 0 to n-1) |
-| `Context` | Type of context struct |
-| `ctx` | Context instance passed to each chunk |
-| `body` | `fn(ctx, start, end)` - processes `[start, end)` |
+### `join2`, `join3`, `joinN`
 
-**Example:**
+Convenience for multiple tasks.
+
+```zig
+// 2 tasks, different return types
+const r = blitz.join2(i32, i64, fnA, fnB);
+
+// 3 tasks
+const r = blitz.join3(i32, i64, f64, fnA, fnB, fnC);
+
+// N tasks (same return type required)
+const funcs = [_]fn() i64{ fn1, fn2, fn3, fn4 };
+const results = blitz.joinN(i64, 4, &funcs);
+```
+
+### `scope(fn)`
+
+Spawn up to 64 tasks dynamically.
+
+```zig
+blitz.scope(struct {
+    fn run(s: *blitz.Scope) void {
+        s.spawn(task1);
+        s.spawn(task2);
+        s.spawn(task3);
+    }
+}.run);
+```
+
+---
+
+## Parallel Algorithms
+
+### Sorting
+
+```zig
+try blitz.parallelSort(T, data, allocator);
+try blitz.parallelSortBy(T, data, allocator, lessThanFn);
+```
+
+### Scan (Prefix Sum)
+
+```zig
+blitz.parallelScan(T, input, output);           // Inclusive
+blitz.parallelScanExclusive(T, input, output);  // Exclusive
+```
+
+### Find
+
+```zig
+blitz.parallelFind(T, data, predicate);         // -> ?usize
+blitz.parallelFindValue(T, data, value);        // -> ?usize
+```
+
+### Partition
+
+```zig
+const pivot = blitz.parallelPartition(T, data, predicate);
+```
+
+---
+
+## Range Iteration
+
+```zig
+// Parallel for-each over indices
+blitz.range(0, 1000).forEach(processIndex);
+
+// Sum over range with value function
+const total = blitz.range(0, 100).sum(i64, valueAtIndex);
+
+// Alternative API
+blitz.parallelForRange(0, n, processIndex);
+blitz.parallelForRangeWithContext(Context, ctx, 0, n, processFn);
+```
+
+---
+
+## Convenience Functions
+
+Top-level wrappers for common operations:
+
+```zig
+blitz.parallelSum(T, data)                // -> T
+blitz.parallelMin(T, data)                // -> ?T
+blitz.parallelMax(T, data)                // -> ?T
+blitz.parallelAny(T, data, pred)          // -> bool
+blitz.parallelAll(T, data, pred)          // -> bool
+blitz.parallelFindAny(T, data, pred)      // -> ?T
+blitz.parallelForEach(T, data, fn)        // -> void
+blitz.parallelMap(T, data, fn)            // -> void (in-place)
+blitz.parallelFill(T, data, value)        // -> void
+```
+
+---
+
+## Low-Level API
+
+For fine-grained control when needed.
+
+### `parallelFor(n, Context, ctx, body)`
+
 ```zig
 const Ctx = struct { data: []f64 };
 blitz.parallelFor(data.len, Ctx, .{ .data = data }, struct {
     fn body(c: Ctx, start: usize, end: usize) void {
-        for (c.data[start..end]) |*v| v.* = v.* * 2;
+        for (c.data[start..end]) |*v| v.* *= 2;
     }
 }.body);
 ```
 
-### `parallelForWithGrain(n, Context, ctx, body, grain) void`
+### `parallelReduce(T, n, identity, Context, ctx, map, combine)`
 
-Same as `parallelFor` with custom minimum chunk size.
-
----
-
-## Parallel Reduce
-
-### `parallelReduce(T, n, identity, Context, ctx, map, combine) T`
-
-Map-reduce pattern with parallel execution.
-
-```zig
-pub fn parallelReduce(
-    comptime T: type,
-    n: usize,
-    identity: T,
-    comptime Context: type,
-    ctx: Context,
-    comptime map: fn(Context, usize) T,
-    comptime combine: fn(T, T) T,
-) T
-```
-
-**Parameters:**
-| Parameter | Description |
-|-----------|-------------|
-| `T` | Result type |
-| `n` | Number of elements |
-| `identity` | Initial value (e.g., 0 for sum) |
-| `map` | `fn(ctx, index) -> T` extracts/transforms element |
-| `combine` | `fn(a, b) -> T` merges results (must be associative) |
-
-**Example:**
 ```zig
 const sum = blitz.parallelReduce(
     i64, data.len, 0,
@@ -153,126 +228,32 @@ const sum = blitz.parallelReduce(
 );
 ```
 
-### `parallelReduceWithGrain(...)`
-
-Same with custom grain size.
-
-### `parallelReduceChunked(T, E, slice, identity, chunkFn, combine) T`
-
-Reduce processing chunks instead of individual elements.
-
----
-
-## Parallel Collect
-
-### `parallelCollect(In, Out, input, output, Context, ctx, map) void`
-
-Transform input slice to output slice in parallel.
+### Grain Size Control
 
 ```zig
-blitz.parallelCollect(i32, i64, input, output, void, {}, struct {
-    fn map(_: void, x: i32) i64 {
-        return @as(i64, x) * @as(i64, x);
-    }
-}.map);
-```
-
-### `parallelMapInPlace(T, Context, data, transform, ctx) void`
-
-Transform slice elements in-place.
-
----
-
-## Parallel Flatten & Scatter
-
-### `parallelFlatten(T, slices, output) void`
-
-Flatten slice of slices into single output array.
-
-```zig
-const slices = [_][]const i64{ slice1, slice2, slice3 };
-blitz.parallelFlatten(i64, &slices, output);
-```
-
-### `parallelScatter(T, values, indices, output) void`
-
-Scatter values to output at specified indices.
-
-```zig
-// output[indices[i]] = values[i]
-blitz.parallelScatter(i64, values, indices, output);
+blitz.setGrainSize(1024);           // Set minimum chunk size
+blitz.getGrainSize();               // Get current grain size
+blitz.defaultGrainSize();           // Get default
+blitz.parallelForWithGrain(..., grain_size);
 ```
 
 ---
 
-## Synchronization Utilities
+## Initialization
 
-### `SyncPtr(T)`
-
-Lock-free pointer for parallel writes to disjoint regions.
+Blitz auto-initializes on first use, but you can configure manually:
 
 ```zig
-var buffer: [1000]u64 = undefined;
-const ptr = blitz.SyncPtr(u64).init(&buffer);
+// Auto-detect thread count
+try blitz.init();
+defer blitz.deinit();
 
-// In parallel body:
-ptr.writeAt(index, value);
-const val = ptr.readAt(index);
+// Custom configuration
+try blitz.initWithConfig(.{
+    .background_worker_count = 8,
+});
+
+// Query
+const workers = blitz.numWorkers();
+const ready = blitz.isInitialized();
 ```
-
-### `computeOffsetsInto(lengths, offsets) void`
-
-Compute cumulative offsets from lengths (exclusive scan).
-
----
-
-## Grain Size Control
-
-### `getGrainSize() usize`
-
-Get current minimum chunk size.
-
-### `setGrainSize(size: usize) void`
-
-Set minimum chunk size for parallel operations.
-
-### `defaultGrainSize: usize`
-
-Constant for automatic grain size selection.
-
----
-
-## Threshold Heuristics
-
-### `shouldParallelize(op: OpType, len: usize) bool`
-
-Check if parallelization is beneficial.
-
-```zig
-if (blitz.shouldParallelize(.sum, data.len)) {
-    // Use parallel
-} else {
-    // Use sequential
-}
-```
-
-### `OpType` enum
-
-```zig
-pub const OpType = enum {
-    sum,
-    min,
-    max,
-    add,
-    mul,
-    transform,
-    filter,
-    sort,
-    scan,
-    // ...
-};
-```
-
-### `isMemoryBound(op: OpType) bool`
-
-Check if operation is memory-bandwidth limited.
