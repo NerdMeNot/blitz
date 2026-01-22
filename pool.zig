@@ -85,8 +85,13 @@ pub const ThreadPool = struct {
     /// Atomic stop flag for shutdown.
     stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
-    /// Number of idle workers (for wake optimization).
+    /// Number of workers that are awake but idle (actively polling for work).
+    /// These workers will find new work naturally without needing a wake.
     idle_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    /// Number of workers that are sleeping (blocked on futex).
+    /// These workers need an explicit wake to find new work.
+    sleeping_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
     /// Head of injected jobs stack (lock-free Treiber stack).
     injected_jobs: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
@@ -190,10 +195,7 @@ pub const ThreadPool = struct {
         }
 
         // Wake a sleeping worker if any (lock-free!)
-        if (self.idle_count.load(.monotonic) > 0) {
-            _ = self.wake_futex.fetchAdd(1, .release);
-            std.Thread.Futex.wake(&self.wake_futex, 1);
-        }
+        self.wakeOne();
 
         // Wait for completion
         call_job.base.done.wait();
@@ -209,11 +211,37 @@ pub const ThreadPool = struct {
     /// This is completely lock-free - just atomic increment + futex wake.
     pub inline fn wakeOne(self: *ThreadPool) void {
         // Quick check - only wake if workers are actually sleeping
-        if (self.idle_count.load(.monotonic) > 0) {
+        if (self.sleeping_count.load(.monotonic) > 0) {
             // Increment futex value to signal change, then wake one waiter
             _ = self.wake_futex.fetchAdd(1, .release);
             std.Thread.Futex.wake(&self.wake_futex, 1);
         }
+    }
+
+    /// Notify the pool that new internal jobs are available (Rayon-style).
+    ///
+    /// This implements Rayon's smart wake strategy:
+    /// - If no workers are sleeping, return (awake-but-idle workers will find work)
+    /// - If queue wasn't empty OR no idle workers, wake a sleeper
+    /// - Otherwise, idle workers will find the work naturally
+    ///
+    /// This minimizes unnecessary wakes while ensuring work gets done.
+    pub inline fn notifyNewJobs(self: *ThreadPool, _: u32, queue_was_empty: bool) void {
+        const num_sleepers = self.sleeping_count.load(.monotonic);
+
+        if (num_sleepers == 0) {
+            // No sleeping workers - awake workers will find the work
+            return;
+        }
+
+        const num_awake_but_idle = self.idle_count.load(.monotonic);
+
+        // Wake if: work is piling up OR no idle workers to find new work
+        if (!queue_was_empty or num_awake_but_idle == 0) {
+            _ = self.wake_futex.fetchAdd(1, .release);
+            std.Thread.Futex.wake(&self.wake_futex, 1);
+        }
+        // Otherwise: idle workers are polling and will find the work
     }
 
     /// Get total jobs executed and stolen across all workers (for debugging).
@@ -252,6 +280,16 @@ pub const ThreadPool = struct {
     }
 };
 
+/// Worker idle state for Rayon-style tracking.
+const IdleState = enum {
+    /// Working or spinning - not counted in any idle counter
+    active,
+    /// Awake but idle - actively polling, counted in idle_count
+    idle,
+    /// Sleeping - blocked on futex, counted in sleeping_count
+    sleeping,
+};
+
 /// Background worker loop.
 fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
     // Create and initialize worker
@@ -264,10 +302,12 @@ fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
     pool.workers_ready.post();
 
     var rounds: u32 = 0;
+    var idle_state: IdleState = .active;
 
     while (!pool.stopping.load(.acquire)) {
         // 1. Try our own deque (fast path)
         if (worker.pop()) |job| {
+            transitionToActive(pool, &idle_state);
             executeJob(worker, job);
             rounds = 0;
             continue;
@@ -275,6 +315,7 @@ fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
 
         // 2. Try stealing from others
         if (trySteal(pool, worker)) |job| {
+            transitionToActive(pool, &idle_state);
             worker.stats.jobs_stolen += 1;
             executeJob(worker, job);
             rounds = 0;
@@ -283,25 +324,29 @@ fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
 
         // 3. Try injected jobs
         if (pool.popInjectedJob()) |injected| {
+            transitionToActive(pool, &idle_state);
             injected.handler(injected, worker);
             rounds = 0;
             continue;
         }
 
-        // 4. Progressive sleep
+        // 4. Progressive sleep (Rayon-style state transitions)
         rounds += 1;
 
         if (rounds < SPIN_LIMIT) {
+            // Phase 1: Spin (not counted as idle)
             std.atomic.spinLoopHint();
         } else if (rounds < YIELD_LIMIT) {
+            // Phase 2: Yield - mark as awake-but-idle
+            transitionToIdle(pool, &idle_state);
             std.Thread.yield() catch {};
         } else {
-            // Sleep using futex (lock-free!)
-            _ = pool.idle_count.fetchAdd(1, .monotonic);
+            // Phase 3: Sleep - transition to sleeping
+            transitionToSleeping(pool, &idle_state);
 
             // Check for work one more time before sleeping
             if (pool.popInjectedJob()) |injected| {
-                _ = pool.idle_count.fetchSub(1, .monotonic);
+                transitionToActive(pool, &idle_state);
                 injected.handler(injected, worker);
                 rounds = 0;
                 continue;
@@ -309,7 +354,7 @@ fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
 
             // Also check deques one more time
             if (trySteal(pool, worker)) |job| {
-                _ = pool.idle_count.fetchSub(1, .monotonic);
+                transitionToActive(pool, &idle_state);
                 worker.stats.jobs_stolen += 1;
                 executeJob(worker, job);
                 rounds = 0;
@@ -322,9 +367,61 @@ fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
                 std.Thread.Futex.wait(&pool.wake_futex, current);
             }
 
-            _ = pool.idle_count.fetchSub(1, .monotonic);
+            // After waking, transition back to active (will re-enter idle if no work)
+            transitionToActive(pool, &idle_state);
             rounds = 0;
         }
+    }
+
+    // Clean up state on exit
+    transitionToActive(pool, &idle_state);
+}
+
+/// Transition worker to active state (decrement appropriate counter).
+fn transitionToActive(pool: *ThreadPool, state: *IdleState) void {
+    switch (state.*) {
+        .active => {},
+        .idle => {
+            _ = pool.idle_count.fetchSub(1, .monotonic);
+            state.* = .active;
+        },
+        .sleeping => {
+            _ = pool.sleeping_count.fetchSub(1, .monotonic);
+            state.* = .active;
+        },
+    }
+}
+
+/// Transition worker to idle state (awake but polling).
+fn transitionToIdle(pool: *ThreadPool, state: *IdleState) void {
+    switch (state.*) {
+        .active => {
+            _ = pool.idle_count.fetchAdd(1, .monotonic);
+            state.* = .idle;
+        },
+        .idle => {},
+        .sleeping => {
+            // Shouldn't happen, but handle it
+            _ = pool.sleeping_count.fetchSub(1, .monotonic);
+            _ = pool.idle_count.fetchAdd(1, .monotonic);
+            state.* = .idle;
+        },
+    }
+}
+
+/// Transition worker to sleeping state.
+fn transitionToSleeping(pool: *ThreadPool, state: *IdleState) void {
+    switch (state.*) {
+        .active => {
+            _ = pool.sleeping_count.fetchAdd(1, .monotonic);
+            state.* = .sleeping;
+        },
+        .idle => {
+            _ = pool.idle_count.fetchSub(1, .monotonic);
+            _ = pool.sleeping_count.fetchAdd(1, .monotonic);
+            state.* = .sleeping;
+        },
+        .sleeping => {},
     }
 }
 
@@ -344,23 +441,45 @@ fn executeJob(worker: *Worker, job: *Job) void {
 }
 
 /// Try to steal from other workers using randomized victim selection.
+///
+/// Follows Rayon's exact steal pattern:
+/// - Single-item stealing (not batch) for simplicity and reliability
+/// - Try each victim once per round
+/// - If any victim returned Retry (contention), do another round
+/// - Stop when a job is found or all victims are Empty
 fn trySteal(pool: *ThreadPool, self_worker: *Worker) ?*Job {
     const num_workers = pool.num_workers;
     if (num_workers <= 1) return null;
 
     const start = self_worker.rng.nextBounded(num_workers);
 
-    for (0..num_workers) |offset| {
-        const victim_idx = (start + offset) % num_workers;
-        if (victim_idx == self_worker.id) continue;
+    // Rayon-style steal loop: single-item stealing with retry on contention
+    while (true) {
+        var retry = false;
 
-        const victim = pool.workers[victim_idx] orelse continue;
-        if (victim.steal()) |job| {
-            return job;
+        for (0..num_workers) |offset| {
+            const victim_idx = (start +% offset) % num_workers;
+            if (victim_idx == self_worker.id) continue;
+
+            const victim = pool.workers[victim_idx] orelse continue;
+
+            // Single-item steal (matches Rayon's approach)
+            if (victim.deque) |*deque| {
+                const result = deque.steal();
+                switch (result.result) {
+                    .success => return result.item,
+                    .empty => {},
+                    .retry => retry = true,
+                }
+            }
         }
-    }
 
-    return null;
+        // If no retries needed, we're done (all victims were empty)
+        if (!retry) {
+            return null;
+        }
+        // Otherwise loop and try all victims again
+    }
 }
 
 // ============================================================================

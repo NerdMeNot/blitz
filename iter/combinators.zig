@@ -34,36 +34,15 @@ pub fn ChainIter(comptime T: type) type {
 
         /// Execute a function for each element in parallel.
         pub fn forEach(self: Self, comptime func: fn (T) void) void {
-            // Process both slices in parallel using join
             if (self.first.len == 0 and self.second.len == 0) return;
 
-            if (self.first.len == 0) {
-                processSlice(T, self.second, func);
-                return;
-            }
-
-            if (self.second.len == 0) {
+            // Process both slices - use parallelFor for each
+            if (self.first.len > 0) {
                 processSlice(T, self.first, func);
-                return;
             }
-
-            const FirstArgs = struct { slice: []const T };
-            const SecondArgs = struct { slice: []const T };
-
-            api.joinVoid(
-                struct {
-                    fn processFirst(args: FirstArgs) void {
-                        processSlice(T, args.slice, func);
-                    }
-                }.processFirst,
-                struct {
-                    fn processSecond(args: SecondArgs) void {
-                        processSlice(T, args.slice, func);
-                    }
-                }.processSecond,
-                FirstArgs{ .slice = self.first },
-                SecondArgs{ .slice = self.second },
-            );
+            if (self.second.len > 0) {
+                processSlice(T, self.second, func);
+            }
         }
 
         /// Reduce all elements using a combining function.
@@ -78,27 +57,10 @@ pub fn ChainIter(comptime T: type) type {
                 return reduceSlice(T, self.first, identity, reducer);
             }
 
-            const FirstArgs = struct { slice: []const T, identity: T };
-            const SecondArgs = struct { slice: []const T, identity: T };
-
-            const results = api.join(
-                T,
-                T,
-                struct {
-                    fn reduceFirst(args: FirstArgs) T {
-                        return reduceSlice(T, args.slice, args.identity, reducer);
-                    }
-                }.reduceFirst,
-                struct {
-                    fn reduceSecond(args: SecondArgs) T {
-                        return reduceSlice(T, args.slice, args.identity, reducer);
-                    }
-                }.reduceSecond,
-                FirstArgs{ .slice = self.first, .identity = identity },
-                SecondArgs{ .slice = self.second, .identity = identity },
-            );
-
-            return reducer(results[0], results[1]);
+            // Reduce both slices and combine
+            const first_result = reduceSlice(T, self.first, identity, reducer);
+            const second_result = reduceSlice(T, self.second, identity, reducer);
+            return reducer(first_result, second_result);
         }
 
         /// Sum all elements.
@@ -112,43 +74,15 @@ pub fn ChainIter(comptime T: type) type {
 
         /// Check if any element satisfies a predicate.
         pub fn any(self: Self, comptime pred: fn (T) bool) bool {
-            var found = std.atomic.Value(bool).init(false);
-
-            const Context = struct { slice: []const T, found: *std.atomic.Value(bool) };
-
-            const first_ctx = Context{ .slice = self.first, .found = &found };
-            const second_ctx = Context{ .slice = self.second, .found = &found };
-
-            api.joinVoid(
-                struct {
-                    fn checkFirst(ctx: Context) void {
-                        if (ctx.found.load(.monotonic)) return;
-                        for (ctx.slice) |item| {
-                            if (ctx.found.load(.monotonic)) return;
-                            if (pred(item)) {
-                                ctx.found.store(true, .release);
-                                return;
-                            }
-                        }
-                    }
-                }.checkFirst,
-                struct {
-                    fn checkSecond(ctx: Context) void {
-                        if (ctx.found.load(.monotonic)) return;
-                        for (ctx.slice) |item| {
-                            if (ctx.found.load(.monotonic)) return;
-                            if (pred(item)) {
-                                ctx.found.store(true, .release);
-                                return;
-                            }
-                        }
-                    }
-                }.checkSecond,
-                first_ctx,
-                second_ctx,
-            );
-
-            return found.load(.acquire);
+            // Check first slice
+            for (self.first) |item| {
+                if (pred(item)) return true;
+            }
+            // Check second slice
+            for (self.second) |item| {
+                if (pred(item)) return true;
+            }
+            return false;
         }
 
         /// Check if all elements satisfy a predicate.

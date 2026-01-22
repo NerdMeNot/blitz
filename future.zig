@@ -108,40 +108,89 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
             task.worker.pushAndWake(&self.job);
         }
 
+        /// Schedule work with Rayon-style smart wake.
+        ///
+        /// This implements Rayon's wake strategy:
+        /// - Check if deque was empty before push
+        /// - Only wake sleeping workers if needed
+        /// - Awake-but-idle workers will find work naturally
+        pub inline fn forkSmartWake(
+            self: *Self,
+            task: *Task,
+            comptime func: fn (*Task, Input) Output,
+            input: Input,
+        ) void {
+            const Handler = struct {
+                fn handle(t: *Task, job: *Job) void {
+                    const fut: *Self = @fieldParentPtr("job", job);
+
+                    const api = @import("api.zig");
+                    const prev_task = api.current_task;
+                    api.current_task = t;
+                    defer api.current_task = prev_task;
+
+                    fut.result = @call(.always_inline, func, .{ t, fut.input });
+                    fut.latch.setDone();
+                }
+            };
+
+            self.input = input;
+            self.job = Job.init();
+            self.job.handler = Handler.handle;
+            self.latch = OnceLatch.init();
+
+            // Check if queue was empty before push (Rayon does this)
+            const queue_was_empty = task.worker.deque != null and task.worker.deque.?.isEmpty();
+
+            // Push to deque
+            task.worker.push(&self.job);
+
+            // Notify pool with Rayon-style logic
+            task.worker.pool.notifyNewJobs(1, queue_was_empty);
+        }
+
         /// Wait for the result of fork().
         ///
         /// Returns the computed value if the job was stolen and executed,
         /// or null if the job was not stolen (caller should execute locally).
         ///
-        /// Uses Chase-Lev deque semantics with ACTIVE work-stealing:
-        /// Instead of just blocking when our job is stolen, we actively
-        /// steal and execute work from other workers. This keeps all CPUs
-        /// busy and is what makes Rayon so fast at scale.
+        /// Hybrid approach for best performance at all depths:
+        /// - Quick latch check first (catches fast stolen completions - good at shallow depth)
+        /// - Then try pop (catches local jobs - good at deep depth)
+        /// - Only enter steal loop when both fail
         pub inline fn join(self: *Self, task: *Task) ?Output {
             const worker = task.worker;
 
-            // Fast path: check if already done (thief was very fast)
+            // Fast path: job was stolen and already completed (common at shallow depth)
             if (self.latch.probe()) {
                 return self.result;
             }
 
-            // Work-stealing loop: keep executing jobs until our job completes
+            // Try to pop our job (common at deep depth - job is usually local)
+            if (worker.pop()) |popped_job| {
+                if (popped_job == &self.job) {
+                    return null; // Execute locally
+                }
+                // Got a different job - execute it
+                if (popped_job.handler) |handler| {
+                    handler(task, popped_job);
+                }
+            }
+
+            // Work-stealing loop for when job was stolen but not yet complete
             while (!self.latch.probe()) {
-                // 1. Try to pop a job from our own deque
+                // Try our deque
                 if (worker.pop()) |popped_job| {
                     if (popped_job == &self.job) {
-                        // We got our own job back - execute locally
                         return null;
                     }
-                    // Execute the other job and continue
                     if (popped_job.handler) |handler| {
                         handler(task, popped_job);
                     }
                     continue;
                 }
 
-                // 2. Local deque empty - try stealing from other workers
-                // This is the key optimization: ACTIVE work-stealing while waiting
+                // Try stealing from others
                 if (tryStealFromOthers(worker)) |stolen_job| {
                     if (stolen_job.handler) |handler| {
                         handler(task, stolen_job);
@@ -149,8 +198,7 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
                     continue;
                 }
 
-                // 3. No work anywhere - spin briefly then check again
-                // This is better than blocking immediately
+                // Spin briefly
                 for (0..32) |_| {
                     std.atomic.spinLoopHint();
                     if (self.latch.probe()) {
@@ -158,12 +206,9 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
                     }
                 }
 
-                // 4. Still nothing - do a single yield to avoid burning CPU
-                // Don't use full latch.wait() which has heavy spinning
                 std.Thread.yield() catch {};
             }
 
-            // Latch was set - job was stolen and completed
             return self.result;
         }
 

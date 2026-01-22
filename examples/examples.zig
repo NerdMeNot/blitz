@@ -199,42 +199,34 @@ fn example3_fork_join() !void {
         \\
     , .{});
 
-    const Input = struct { n: u32 };
-
     const start = std.time.nanoTimestamp();
 
-    // Fork two compute tasks
-    const results = blitz.join(
-        u64,
-        u64,
-        struct {
-            fn computeA(input: Input) u64 {
-                // Simulate work
+    // Fork two compute tasks using unified join API
+    const results = blitz.join(.{
+        .a = .{struct {
+            fn compute(n: u32) u64 {
                 var sum: u64 = 0;
-                for (0..input.n) |i| {
+                for (0..n) |i| {
                     sum += i * 2;
                 }
                 return sum;
             }
-        }.computeA,
-        struct {
-            fn computeB(input: Input) u64 {
-                // Simulate different work
+        }.compute, @as(u32, 1_000_000)},
+        .b = .{struct {
+            fn compute(n: u32) u64 {
                 var sum: u64 = 0;
-                for (0..input.n) |i| {
+                for (0..n) |i| {
                     sum += i * 3;
                 }
                 return sum;
             }
-        }.computeB,
-        Input{ .n = 1_000_000 },
-        Input{ .n = 1_000_000 },
-    );
+        }.compute, @as(u32, 1_000_000)},
+    });
 
     const elapsed_ns = std.time.nanoTimestamp() - start;
 
-    print("  Task A result: {}\n", .{results[0]});
-    print("  Task B result: {}\n", .{results[1]});
+    print("  Task A result: {}\n", .{results.a});
+    print("  Task B result: {}\n", .{results.b});
     print("  Total time: {d:.2} ms (ran in parallel!)\n\n", .{
         @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0,
     });
@@ -287,9 +279,13 @@ fn fibPar(n: u64) u64 {
     // Sequential threshold - don't parallelize small subproblems
     if (n <= 20) return fibSeq(n);
 
-    // Fork fib(n-2), execute fib(n-1) locally
-    const results = blitz.join(u64, u64, fibPar, fibPar, n - 1, n - 2);
-    return results[0] + results[1];
+    // Fork fib(n-1) and fib(n-2) in parallel with unified join API
+    const r = blitz.join(.{
+        .a = .{ fibPar, n - 1 },
+        .b = .{ fibPar, n - 2 },
+    });
+
+    return r.a + r.b;
 }
 
 // ============================================================================
@@ -336,14 +332,14 @@ fn example5_parallel_collect() !void {
 }
 
 // ============================================================================
-// Example 6: Scope-Based Parallelism (using joinVoid)
+// Example 6: Scope-Based Parallelism (using parallelForWithGrain)
 // ============================================================================
 
 fn example6_scope_parallelism() !void {
     print(
         \\----------------------------------------------------------------------
         \\ Example 6: Scope-Based Parallelism
-        \\ Execute multiple independent void tasks with joinVoid
+        \\ Execute multiple independent tasks in parallel
         \\----------------------------------------------------------------------
         \\
     , .{});
@@ -351,28 +347,34 @@ fn example6_scope_parallelism() !void {
     var result_a: u64 = 0;
     var result_b: u64 = 0;
 
-    const Context = struct { result: *u64 };
+    const Context = struct {
+        result_a: *u64,
+        result_b: *u64,
+    };
 
     const start = std.time.nanoTimestamp();
 
-    blitz.joinVoid(
-        struct {
-            fn taskA(ctx: Context) void {
-                var sum: u64 = 0;
-                for (0..1_000_000) |i| sum += i;
-                ctx.result.* = sum;
+    // Fork two independent tasks using parallelForWithGrain
+    blitz.parallelForWithGrain(2, Context, Context{
+        .result_a = &result_a,
+        .result_b = &result_b,
+    }, struct {
+        fn body(ctx: Context, start_idx: usize, end_idx: usize) void {
+            for (start_idx..end_idx) |i| {
+                if (i == 0) {
+                    // Task A: compute sum 0..1M
+                    var sum: u64 = 0;
+                    for (0..1_000_000) |j| sum += j;
+                    ctx.result_a.* = sum;
+                } else {
+                    // Task B: compute 20!
+                    var prod: u64 = 1;
+                    for (1..21) |j| prod *= j;
+                    ctx.result_b.* = prod;
+                }
             }
-        }.taskA,
-        struct {
-            fn taskB(ctx: Context) void {
-                var prod: u64 = 1;
-                for (1..21) |i| prod *= i;
-                ctx.result.* = prod;
-            }
-        }.taskB,
-        Context{ .result = &result_a },
-        Context{ .result = &result_b },
-    );
+        }
+    }.body, 1);
 
     const elapsed = std.time.nanoTimestamp() - start;
 

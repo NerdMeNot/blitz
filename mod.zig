@@ -43,8 +43,11 @@
 //! // Recursive divide-and-conquer (Rayon's strength)
 //! fn parallelFib(n: u64) u64 {
 //!     if (n < 20) return sequentialFib(n);
-//!     const r = blitz.join(u64, u64, parallelFib, parallelFib, n-2, n-1);
-//!     return r[0] + r[1];
+//!     const r = blitz.join(.{
+//!         .a = .{ parallelFib, n - 2 },
+//!         .b = .{ parallelFib, n - 1 },
+//!     });
+//!     return r.a + r.b;
 //! }
 //! ```
 
@@ -80,11 +83,9 @@ pub const setGrainSize = api.setGrainSize;
 pub const defaultGrainSize = api.defaultGrainSize;
 
 pub const join = api.join;
-pub const joinVoid = api.joinVoid;
 
-// Error-safe join variants (task B always completes even if task A fails)
+// Error-safe join (task B always completes even if task A fails)
 pub const tryJoin = api.tryJoin;
-pub const tryJoinVoid = api.tryJoinVoid;
 
 pub const parallelFor = api.parallelFor;
 pub const parallelForWithGrain = api.parallelForWithGrain;
@@ -144,11 +145,16 @@ pub const scope_mod = @import("scope.zig");
 pub const scope = scope_mod.scope;
 pub const scopeWithContext = scope_mod.scopeWithContext;
 pub const Scope = scope_mod.Scope;
-pub const join2 = scope_mod.join2;
-pub const join3 = scope_mod.join3;
-pub const joinN = scope_mod.joinN;
 pub const parallelForRange = scope_mod.parallelForRange;
 pub const parallelForRangeWithContext = scope_mod.parallelForRangeWithContext;
+
+// Fire-and-forget spawn
+pub const spawn = scope_mod.spawn;
+pub const spawnWithContext = scope_mod.spawnWithContext;
+
+// Broadcast (execute on all workers)
+pub const broadcast = scope_mod.broadcast;
+pub const broadcastWithContext = scope_mod.broadcastWithContext;
 
 // Parallel algorithms
 pub const algorithms = @import("algorithms.zig");

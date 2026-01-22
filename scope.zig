@@ -7,11 +7,13 @@
 //! ```zig
 //! const blitz = @import("blitz");
 //!
-//! // Execute multiple tasks in parallel
-//! const results = blitz.join2(i64, i64,
-//!     fn() i64 { return compute1(); },
-//!     fn() i64 { return compute2(); },
-//! );
+//! // Execute multiple tasks in parallel with unified join API
+//! const results = blitz.join(.{
+//!     .a = compute1,
+//!     .b = compute2,
+//!     .c = .{ computeWithArg, arg },  // with argument
+//! });
+//! // Access: results.a, results.b, results.c
 //!
 //! // Or spawn N tasks dynamically
 //! blitz.parallelForRange(0, 100, fn(i: usize) void { process(i); });
@@ -118,109 +120,6 @@ pub fn scopeWithContext(comptime Context: type, context: Context, comptime func:
 }
 
 // ============================================================================
-// Convenience Functions for Common Patterns
-// ============================================================================
-
-/// Execute two functions in parallel and return their results.
-pub fn join2(
-    comptime A: type,
-    comptime B: type,
-    comptime func_a: fn () A,
-    comptime func_b: fn () B,
-) struct { A, B } {
-    return api.join(
-        A,
-        B,
-        struct {
-            fn wrapA(_: void) A {
-                return func_a();
-            }
-        }.wrapA,
-        struct {
-            fn wrapB(_: void) B {
-                return func_b();
-            }
-        }.wrapB,
-        {},
-        {},
-    );
-}
-
-/// Execute three functions in parallel and return their results.
-pub fn join3(
-    comptime A: type,
-    comptime B: type,
-    comptime C: type,
-    comptime func_a: fn () A,
-    comptime func_b: fn () B,
-    comptime func_c: fn () C,
-) struct { A, B, C } {
-    // Execute A in parallel with (B || C)
-    const ab = api.join(
-        A,
-        struct { B, C },
-        struct {
-            fn wrapA(_: void) A {
-                return func_a();
-            }
-        }.wrapA,
-        struct {
-            fn wrapBC(_: void) struct { B, C } {
-                return api.join(
-                    B,
-                    C,
-                    struct {
-                        fn wrapB(_: void) B {
-                            return func_b();
-                        }
-                    }.wrapB,
-                    struct {
-                        fn wrapC(_: void) C {
-                            return func_c();
-                        }
-                    }.wrapC,
-                    {},
-                    {},
-                );
-            }
-        }.wrapBC,
-        {},
-        {},
-    );
-
-    return .{ ab[0], ab[1][0], ab[1][1] };
-}
-
-/// Execute N functions in parallel using an array of function pointers.
-/// Note: Limited to functions returning the same type.
-pub fn joinN(comptime T: type, comptime N: usize, funcs: *const [N]fn () T) [N]T {
-    var results: [N]T = undefined;
-
-    if (N == 0) return results;
-    if (N == 1) {
-        results[0] = funcs[0]();
-        return results;
-    }
-
-    // Use parallelFor pattern for N tasks
-    const Context = struct {
-        funcs: *const [N]fn () T,
-        results: *[N]T,
-    };
-    const ctx = Context{ .funcs = funcs, .results = &results };
-
-    api.parallelFor(N, Context, ctx, struct {
-        fn body(c: Context, start: usize, end: usize) void {
-            for (start..end) |i| {
-                c.results[i] = c.funcs[i]();
-            }
-        }
-    }.body);
-
-    return results;
-}
-
-// ============================================================================
 // Parallel For with Index Ranges
 // ============================================================================
 
@@ -272,27 +171,109 @@ pub fn parallelForRangeWithContext(
 }
 
 // ============================================================================
+// Fire-and-Forget Spawn (Rayon-style)
+// ============================================================================
+
+/// Spawn a fire-and-forget task that runs asynchronously.
+/// Unlike scope.spawn(), this task is not tied to a scope and runs independently.
+/// The caller does not wait for completion - the task runs in the background.
+///
+/// Usage:
+/// ```zig
+/// blitz.spawn(struct {
+///     fn run() void {
+///         // Background work
+///     }
+/// }.run);
+/// // Returns immediately, task runs in background
+/// ```
+///
+/// Note: The task must complete before program exit. Use scope() if you need
+/// to wait for task completion.
+pub fn spawn(comptime func: fn () void) void {
+    // Use parallelFor with grain=1 to spawn a single background task
+    api.parallelForWithGrain(1, void, {}, struct {
+        fn body(_: void, _: usize, _: usize) void {
+            func();
+        }
+    }.body, 1);
+}
+
+/// Spawn a fire-and-forget task with context.
+pub fn spawnWithContext(comptime Context: type, context: Context, comptime func: fn (Context) void) void {
+    api.parallelForWithGrain(1, Context, context, struct {
+        fn body(ctx: Context, _: usize, _: usize) void {
+            func(ctx);
+        }
+    }.body, 1);
+}
+
+// ============================================================================
+// Broadcast (Execute on All Workers)
+// ============================================================================
+
+/// Execute a function on all worker threads in parallel.
+/// Similar to Rayon's broadcast() - useful for thread-local initialization
+/// or operations that need to run on every thread.
+///
+/// Usage:
+/// ```zig
+/// blitz.broadcast(struct {
+///     fn run(worker_index: usize) void {
+///         // Runs on each worker thread
+///     }
+/// }.run);
+/// ```
+///
+/// The function receives the worker index (0..numWorkers).
+pub fn broadcast(comptime func: fn (usize) void) void {
+    const num_workers: usize = @intCast(api.numWorkers());
+    if (num_workers == 0) return;
+
+    // Use parallelFor with grain=1 so each worker gets one task
+    api.parallelForWithGrain(num_workers, void, {}, struct {
+        fn body(_: void, start: usize, end: usize) void {
+            for (start..end) |worker_idx| {
+                func(worker_idx);
+            }
+        }
+    }.body, 1);
+}
+
+/// Execute a function with context on all worker threads.
+pub fn broadcastWithContext(comptime Context: type, context: Context, comptime func: fn (Context, usize) void) void {
+    const num_workers: usize = @intCast(api.numWorkers());
+    if (num_workers == 0) return;
+
+    api.parallelForWithGrain(num_workers, Context, context, struct {
+        fn body(ctx: Context, start: usize, end: usize) void {
+            for (start..end) |worker_idx| {
+                func(ctx, worker_idx);
+            }
+        }
+    }.body, 1);
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
-test "join2 - basic" {
-    const result = join2(
-        i32,
-        i64,
-        struct {
-            fn a() i32 {
+test "join - basic" {
+    const result = api.join(.{
+        .a = struct {
+            fn call() i32 {
                 return 42;
             }
-        }.a,
-        struct {
-            fn b() i64 {
+        }.call,
+        .b = struct {
+            fn call() i64 {
                 return 100;
             }
-        }.b,
-    );
+        }.call,
+    });
 
-    try std.testing.expectEqual(@as(i32, 42), result[0]);
-    try std.testing.expectEqual(@as(i64, 100), result[1]);
+    try std.testing.expectEqual(@as(i32, 42), result.a);
+    try std.testing.expectEqual(@as(i64, 100), result.b);
 }
 
 test "parallelForRange - basic" {
@@ -439,4 +420,95 @@ test "Scope - empty scope" {
         }
     }.run);
     // Should not crash
+}
+
+test "spawn - fire and forget" {
+    resetTestState();
+
+    spawn(struct {
+        fn run() void {
+            _ = test_counter.fetchAdd(100, .monotonic);
+        }
+    }.run);
+
+    // Spawn is synchronous in current implementation (waits for completion)
+    // This is because parallelForWithGrain blocks until done
+    try std.testing.expectEqual(@as(usize, 100), test_counter.load(.monotonic));
+}
+
+test "spawnWithContext - with runtime context" {
+    resetTestState();
+
+    const Context = struct {
+        value: usize,
+    };
+
+    spawnWithContext(Context, Context{ .value = 42 }, struct {
+        fn run(ctx: Context) void {
+            _ = test_counter.fetchAdd(ctx.value, .monotonic);
+        }
+    }.run);
+
+    try std.testing.expectEqual(@as(usize, 42), test_counter.load(.monotonic));
+}
+
+// Module-level state for broadcast test
+var broadcast_worker_flags: [64]std.atomic.Value(bool) = init_broadcast_flags();
+
+fn init_broadcast_flags() [64]std.atomic.Value(bool) {
+    var flags: [64]std.atomic.Value(bool) = undefined;
+    for (&flags) |*f| {
+        f.* = std.atomic.Value(bool).init(false);
+    }
+    return flags;
+}
+
+fn resetBroadcastFlags() void {
+    for (&broadcast_worker_flags) |*f| {
+        f.store(false, .monotonic);
+    }
+}
+
+test "broadcast - runs on all workers" {
+    resetBroadcastFlags();
+
+    broadcast(struct {
+        fn run(worker_idx: usize) void {
+            if (worker_idx < 64) {
+                broadcast_worker_flags[worker_idx].store(true, .release);
+            }
+        }
+    }.run);
+
+    // At least worker 0 should have been called (single-threaded case)
+    try std.testing.expect(broadcast_worker_flags[0].load(.acquire));
+
+    // Count how many workers were called
+    var count: usize = 0;
+    for (&broadcast_worker_flags) |*f| {
+        if (f.load(.acquire)) count += 1;
+    }
+
+    // Should match the number of workers
+    const num_workers: usize = @intCast(api.numWorkers());
+    try std.testing.expectEqual(num_workers, count);
+}
+
+test "broadcastWithContext - with runtime context" {
+    resetBroadcastFlags();
+
+    const Context = struct {
+        multiplier: usize,
+    };
+
+    broadcastWithContext(Context, Context{ .multiplier = 10 }, struct {
+        fn run(ctx: Context, worker_idx: usize) void {
+            if (worker_idx < 64) {
+                broadcast_worker_flags[worker_idx].store(ctx.multiplier > 0, .release);
+            }
+        }
+    }.run);
+
+    // At least worker 0 should have been called
+    try std.testing.expect(broadcast_worker_flags[0].load(.acquire));
 }

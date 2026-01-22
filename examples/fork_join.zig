@@ -5,15 +5,19 @@
 const std = @import("std");
 const blitz = @import("blitz");
 
-/// Parallel Fibonacci using fork-join
+/// Parallel Fibonacci using fork-join with unified join API
 fn fib(n: u64) u64 {
     // Base case: sequential for small n
     if (n <= 20) return fibSeq(n);
 
     // Fork: compute fib(n-1) and fib(n-2) in parallel
-    const results = blitz.join(u64, u64, fib, fib, n - 1, n - 2);
+    // The unified join API now supports runtime arguments!
+    const r = blitz.join(.{
+        .a = .{ fib, n - 1 },
+        .b = .{ fib, n - 2 },
+    });
 
-    return results[0] + results[1];
+    return r.a + r.b;
 }
 
 /// Sequential Fibonacci
@@ -29,13 +33,7 @@ fn fibSeq(n: u64) u64 {
     return b;
 }
 
-/// Args for merge sort recursion
-const MergeSortArgs = struct {
-    d: []i32,
-    t: []i32,
-};
-
-/// Parallel merge sort using fork-join
+/// Parallel merge sort using fork-join with unified join API
 fn mergeSort(data: []i32, temp: []i32) void {
     if (data.len <= 32) {
         // Base case: insertion sort
@@ -46,20 +44,11 @@ fn mergeSort(data: []i32, temp: []i32) void {
     const mid = data.len / 2;
 
     // Fork: sort left and right halves in parallel
-    blitz.joinVoid(
-        struct {
-            fn sortLeft(args: MergeSortArgs) void {
-                mergeSort(args.d, args.t);
-            }
-        }.sortLeft,
-        struct {
-            fn sortRight(args: MergeSortArgs) void {
-                mergeSort(args.d, args.t);
-            }
-        }.sortRight,
-        MergeSortArgs{ .d = data[0..mid], .t = temp[0..mid] },
-        MergeSortArgs{ .d = data[mid..], .t = temp[mid..] },
-    );
+    // The unified join API supports runtime arguments and void returns!
+    _ = blitz.join(.{
+        .left = .{ mergeSort, data[0..mid], temp[0..mid] },
+        .right = .{ mergeSort, data[mid..], temp[mid..] },
+    });
 
     // Merge the sorted halves
     merge(data, temp, mid);

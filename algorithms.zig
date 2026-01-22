@@ -70,22 +70,11 @@ fn parallelMergeSort(comptime T: type, data: []T, aux: []T, comptime lessThan: f
     const aux_left = aux[0..mid];
     const aux_right = aux[mid..];
 
-    // Sort halves in parallel using parallelFor pattern
-    // Note: We use joinVoid which takes functions that return void
-    api.joinVoid(
-        struct {
-            fn sortLeft(args: struct { []T, []T }) void {
-                parallelMergeSort(T, args[0], args[1], lessThan);
-            }
-        }.sortLeft,
-        struct {
-            fn sortRight(args: struct { []T, []T }) void {
-                parallelMergeSort(T, args[0], args[1], lessThan);
-            }
-        }.sortRight,
-        .{ left, aux_left },
-        .{ right, aux_right },
-    );
+    // Sort halves in parallel using unified join API
+    _ = api.join(.{
+        .left = .{ parallelMergeSort, T, left, aux_left, lessThan },
+        .right = .{ parallelMergeSort, T, right, aux_right, lessThan },
+    });
 
     // Parallel merge
     parallelMerge(T, left, right, aux, lessThan);
@@ -119,22 +108,11 @@ fn parallelMerge(comptime T: type, left: []const T, right: []const T, out: []T, 
         // Write mid value first
         out[mid_out] = mid_val;
 
-        // Merge halves in parallel
-        const MergeArgs = struct { []const T, []const T, []T };
-        api.joinVoid(
-            struct {
-                fn mergeLeft(args: MergeArgs) void {
-                    parallelMerge(T, args[0], args[1], args[2], lessThan);
-                }
-            }.mergeLeft,
-            struct {
-                fn mergeRight(args: MergeArgs) void {
-                    parallelMerge(T, args[0], args[1], args[2], lessThan);
-                }
-            }.mergeRight,
-            .{ left[0..mid_left], right[0..mid_right], out[0..mid_out] },
-            .{ left[mid_left + 1 ..], right[mid_right..], out[mid_out + 1 ..] },
-        );
+        // Merge halves in parallel using unified join API
+        _ = api.join(.{
+            .lo = .{ parallelMerge, T, left[0..mid_left], right[0..mid_right], out[0..mid_out], lessThan },
+            .hi = .{ parallelMerge, T, left[mid_left + 1 ..], right[mid_right..], out[mid_out + 1 ..], lessThan },
+        });
     } else {
         // Swap: use same logic but with right as the "larger" array
         const mid_right = right.len / 2;
@@ -149,22 +127,11 @@ fn parallelMerge(comptime T: type, left: []const T, right: []const T, out: []T, 
         // Write mid value
         out[mid_out] = mid_val;
 
-        // Merge halves in parallel
-        const MergeArgs2 = struct { []const T, []const T, []T };
-        api.joinVoid(
-            struct {
-                fn mergeLeft(args: MergeArgs2) void {
-                    parallelMerge(T, args[0], args[1], args[2], lessThan);
-                }
-            }.mergeLeft,
-            struct {
-                fn mergeRight(args: MergeArgs2) void {
-                    parallelMerge(T, args[0], args[1], args[2], lessThan);
-                }
-            }.mergeRight,
-            .{ left[0..mid_left], right[0..mid_right], out[0..mid_out] },
-            .{ left[mid_left..], right[mid_right + 1 ..], out[mid_out + 1 ..] },
-        );
+        // Merge halves in parallel using unified join API
+        _ = api.join(.{
+            .lo = .{ parallelMerge, T, left[0..mid_left], right[0..mid_right], out[0..mid_out], lessThan },
+            .hi = .{ parallelMerge, T, left[mid_left..], right[mid_right + 1 ..], out[mid_out + 1 ..], lessThan },
+        });
     }
 }
 

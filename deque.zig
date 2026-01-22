@@ -54,8 +54,8 @@ pub fn Deque(comptime T: type) type {
         // Padding to separate bottom from buffer/mask metadata
         _padding2: [CACHE_LINE - @sizeOf(std.atomic.Value(isize))]u8 = undefined,
 
-        // === Cache line 3: Read-only metadata (after init) ===
-        /// Circular buffer of items.
+        // === Cache line 3: Buffer metadata ===
+        /// Circular buffer of items (owner's fast access).
         buffer: []T align(CACHE_LINE),
 
         /// Mask for wrapping indices (buffer.len - 1, assumes power of 2).
@@ -110,9 +110,14 @@ pub fn Deque(comptime T: type) type {
                 new_buffer[new_idx] = self.buffer[old_idx];
             }
 
-            self.allocator.free(self.buffer);
+            const old_buffer = self.buffer;
+
+            // Update buffer and mask
             self.buffer = new_buffer;
             self.mask = new_capacity - 1;
+
+            // Free old buffer immediately (single-item stealing is safe)
+            self.allocator.free(old_buffer);
         }
 
         /// Get the current number of items (approximate, may race with steal).

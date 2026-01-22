@@ -76,8 +76,14 @@ fn benchmark(comptime func: anytype, args: anytype) u64 {
 
 fn recursiveJoin(depth: usize) usize {
     if (depth == 0) return 1;
-    const r = blitz.join(usize, usize, recursiveJoin, recursiveJoin, depth - 1, depth - 1);
-    return r[0] + r[1];
+
+    // Unified join API supports runtime arguments
+    const r = blitz.join(.{
+        .a = .{ recursiveJoin, depth - 1 },
+        .b = .{ recursiveJoin, depth - 1 },
+    });
+
+    return r.a + r.b;
 }
 
 // ============================================================================
@@ -99,8 +105,14 @@ fn fibSeq(n: u64) u64 {
 
 fn fibPar(n: u64) u64 {
     if (n <= 20) return fibSeq(n);
-    const r = blitz.join(u64, u64, fibPar, fibPar, n - 2, n - 1);
-    return r[0] + r[1];
+
+    // Unified join API supports runtime arguments
+    const r = blitz.join(.{
+        .a = .{ fibPar, n - 2 },
+        .b = .{ fibPar, n - 1 },
+    });
+
+    return r.a + r.b;
 }
 
 // ============================================================================

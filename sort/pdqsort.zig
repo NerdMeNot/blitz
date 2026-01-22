@@ -307,24 +307,11 @@ pub fn recurse(
                 // pred stays the same
             }
         } else {
-            // Parallel: use blitz fork-join
-            const LeftArgs = struct { slice: []T, p: ?*const T, lim: u32 };
-            const RightArgs = struct { slice: []T, p: ?*const T, lim: u32 };
-
-            blitz.joinVoid(
-                struct {
-                    fn sortLeft(args: LeftArgs) void {
-                        recurse(T, args.slice, is_less, args.p, args.lim);
-                    }
-                }.sortLeft,
-                struct {
-                    fn sortRight(args: RightArgs) void {
-                        recurse(T, args.slice, is_less, args.p, args.lim);
-                    }
-                }.sortRight,
-                LeftArgs{ .slice = left, .p = pred, .lim = limit },
-                RightArgs{ .slice = right, .p = pivot_ptr, .lim = limit },
-            );
+            // Parallel: use unified join API for fork-join
+            _ = blitz.join(.{
+                .left = .{ recurse, T, left, is_less, pred, limit },
+                .right = .{ recurse, T, right, is_less, pivot_ptr, limit },
+            });
             return;
         }
     }

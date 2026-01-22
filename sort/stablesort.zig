@@ -357,36 +357,15 @@ fn parMerge(comptime T: type, left: []T, right: []T, dest: [*]T, comptime is_les
         return;
     }
 
-    // Parallel merge
+    // Parallel merge using unified join API
     const split = splitForMerge(T, left, right, is_less);
     const left_split = split[0];
     const right_split = split[1];
 
-    const left_l = left[0..left_split];
-    const left_r = left[left_split..];
-    const right_l = right[0..right_split];
-    const right_r = right[right_split..];
-
-    const dest_l = dest;
-    const dest_r = dest + left_split + right_split;
-
-    const LeftArgs = struct { left: []T, right: []T, dest: [*]T };
-    const RightArgs = struct { left: []T, right: []T, dest: [*]T };
-
-    blitz.joinVoid(
-        struct {
-            fn mergeLeft(args: LeftArgs) void {
-                parMerge(T, args.left, args.right, args.dest, is_less);
-            }
-        }.mergeLeft,
-        struct {
-            fn mergeRight(args: RightArgs) void {
-                parMerge(T, args.left, args.right, args.dest, is_less);
-            }
-        }.mergeRight,
-        LeftArgs{ .left = @constCast(left_l), .right = @constCast(right_l), .dest = dest_l },
-        RightArgs{ .left = @constCast(left_r), .right = @constCast(right_r), .dest = dest_r },
-    );
+    _ = blitz.join(.{
+        .lo = .{ parMerge, T, @constCast(left[0..left_split]), @constCast(right[0..right_split]), dest, is_less },
+        .hi = .{ parMerge, T, @constCast(left[left_split..]), @constCast(right[right_split..]), dest + left_split + right_split, is_less },
+    });
 }
 
 /// Recursively merges pre-sorted chunks.
@@ -424,31 +403,14 @@ fn mergeRecurse(
     const src: [*]T = if (into_buf) v else buf;
     const dest: [*]T = if (into_buf) buf else v;
 
-    // Recursively process both halves in parallel
+    // Recursively process both halves in parallel using unified join API
     // Note: child calls get !into_buf, so we pass that flag
     const child_into_buf = !into_buf;
 
-    const MergeArgs = struct {
-        v: [*]T,
-        buf: [*]T,
-        chunks: []const struct { usize, usize },
-        into_buf: bool,
-    };
-
-    blitz.joinVoid(
-        struct {
-            fn processLeft(args: MergeArgs) void {
-                mergeRecurse(T, args.v, args.buf, args.chunks, args.into_buf, is_less);
-            }
-        }.processLeft,
-        struct {
-            fn processRight(args: MergeArgs) void {
-                mergeRecurse(T, args.v, args.buf, args.chunks, args.into_buf, is_less);
-            }
-        }.processRight,
-        MergeArgs{ .v = v, .buf = buf, .chunks = left_chunks, .into_buf = child_into_buf },
-        MergeArgs{ .v = v, .buf = buf, .chunks = right_chunks, .into_buf = child_into_buf },
-    );
+    _ = blitz.join(.{
+        .left = .{ mergeRecurse, T, v, buf, left_chunks, child_into_buf, is_less },
+        .right = .{ mergeRecurse, T, v, buf, right_chunks, child_into_buf, is_less },
+    });
 
     // Merge the two halves
     const src_left = src[start..mid];

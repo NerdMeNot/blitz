@@ -1,3 +1,6 @@
+# Proto
+.prototools
+
 # Zig
 zig-out/
 zig-cache/
