@@ -5,6 +5,29 @@
 use rayon::prelude::*;
 use std::time::Instant;
 
+#[cfg(unix)]
+fn get_resource_usage() -> (i64, i64, i64) {
+    use std::mem::MaybeUninit;
+
+    let mut rusage = MaybeUninit::<libc::rusage>::uninit();
+    unsafe {
+        libc::getrusage(libc::RUSAGE_SELF, rusage.as_mut_ptr());
+        let ru = rusage.assume_init();
+        // macOS reports maxrss in bytes, Linux in KB
+        #[cfg(target_os = "macos")]
+        let peak_kb = ru.ru_maxrss / 1024;
+        #[cfg(not(target_os = "macos"))]
+        let peak_kb = ru.ru_maxrss;
+
+        (peak_kb, ru.ru_nvcsw, ru.ru_nivcsw)
+    }
+}
+
+#[cfg(not(unix))]
+fn get_resource_usage() -> (i64, i64, i64) {
+    (0, 0, 0)
+}
+
 const NUM_WORKERS: usize = 10;
 const WARMUP_ITERATIONS: usize = 5;
 const BENCHMARK_ITERATIONS: usize = 10;
@@ -274,6 +297,14 @@ fn main() {
         emit("flatten_1000x10k_ms", benchmark(|| {
             chunks.par_iter().flatten().sum::<i64>()
         }) as f64 / 1_000_000.0);
+    }
+
+    // Resource usage
+    {
+        let (peak_kb, nvcsw, nivcsw) = get_resource_usage();
+        emit("peak_memory_kb", peak_kb as f64);
+        emit("voluntary_ctx_switches", nvcsw as f64);
+        emit("involuntary_ctx_switches", nivcsw as f64);
     }
 
     println!("\n}}");

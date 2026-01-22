@@ -91,7 +91,7 @@ calc_diff() {
         return
     fi
 
-    local ratio=$(echo "scale=4; $blitz / $rayon" | bc 2>/dev/null)
+    local ratio=$(echo "scale=6; $blitz / $rayon" | bc 2>/dev/null)
     if [[ -z "$ratio" ]]; then
         echo "N/A"
         return
@@ -99,11 +99,24 @@ calc_diff() {
 
     local is_faster=$(echo "$ratio < 1" | bc 2>/dev/null)
     if [[ "$is_faster" == "1" ]]; then
-        local pct=$(echo "scale=1; (1 - $ratio) * 100" | bc 2>/dev/null)
-        echo -e "${GREEN}+${pct}% faster${NC}"
+        local pct=$(echo "scale=6; (1 - $ratio) * 100" | bc 2>/dev/null)
+        local pct_fmt=$(printf "%.2f" "$pct")
+        echo -e "${GREEN}+${pct_fmt}% faster${NC}"
     else
-        local pct=$(echo "scale=1; ($ratio - 1) * 100" | bc 2>/dev/null)
-        echo -e "${RED}-${pct}% slower${NC}"
+        local pct=$(echo "scale=6; ($ratio - 1) * 100" | bc 2>/dev/null)
+        local pct_fmt=$(printf "%.2f" "$pct")
+        echo -e "${RED}-${pct_fmt}% slower${NC}"
+    fi
+}
+
+# Format value with unit (right-aligned within fixed width)
+fmt_val() {
+    local val="$1"
+    local unit="$2"
+    if [[ -z "$val" || "$val" == "N/A" ]]; then
+        echo "N/A"
+    else
+        echo "${val} ${unit}"
     fi
 }
 
@@ -128,7 +141,7 @@ hline() {
     printf "%s\n" "$right"
 }
 
-# Print table row
+# Print table row with proper alignment
 print_row() {
     local c1="$1"
     local c2="$2"
@@ -139,13 +152,14 @@ print_row() {
     local w3="$7"
     local w4="$8"
 
-    # Strip ANSI codes for width calculation
+    # Strip ANSI codes for width calculation of c4
     local c4_clean=$(echo -e "$c4" | sed $'s/\033\\[[0-9;]*m//g')
     local c4_len=${#c4_clean}
     local c4_pad=$((w4 - c4_len))
     if [[ $c4_pad -lt 0 ]]; then c4_pad=0; fi
 
-    printf "%s %-${w1}s %s %${w2}s %s %${w3}s %s %-s%*s %s\n" \
+    # Use printf with explicit field widths
+    printf "%s %-${w1}s %s %${w2}s %s %${w3}s %s %s%*s %s\n" \
         "$V" "$c1" "$V" "$c2" "$V" "$c3" "$V" "$c4" "$c4_pad" "" "$V"
 }
 
@@ -165,9 +179,9 @@ echo -e "${BOLD}═════════════════════�
 
 # Column widths
 W1=24  # Benchmark name
-W2=12  # Blitz
-W3=12  # Rayon
-W4=18  # Difference
+W2=14  # Blitz
+W3=14  # Rayon
+W4=16  # Difference
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Fork-Join Overhead
@@ -183,7 +197,7 @@ for depth in 10 15 20; do
     b=$(get_blitz "$key")
     r=$(get_rayon "$key")
     diff=$(calc_diff "$b" "$r")
-    print_row "Depth $depth" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+    print_row "Depth $depth" "$(fmt_val "$b" "ns")" "$(fmt_val "$r" "ns")" "$diff" $W1 $W2 $W3 $W4
 done
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
@@ -202,7 +216,7 @@ for n in 35 40; do
     b=$(get_blitz "$key")
     r=$(get_rayon "$key")
     diff=$(calc_diff "$b" "$r")
-    print_row "fib($n) parallel" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+    print_row "fib($n) parallel" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 done
 
 for n in 35 40; do
@@ -210,7 +224,7 @@ for n in 35 40; do
     b=$(get_blitz "$key")
     r=$(get_rayon "$key")
     diff=$(calc_diff "$b" "$r")
-    print_row "fib($n) sequential" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+    print_row "fib($n) sequential" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 done
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
@@ -228,13 +242,13 @@ key="sum_10m_par_ms"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "Parallel sum" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "Parallel sum" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 
 key="sum_10m_seq_ms"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "Sequential sum" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "Sequential sum" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
 
@@ -254,7 +268,7 @@ for pattern in random sorted reverse equal; do
     diff=$(calc_diff "$b" "$r")
     # Capitalize first letter
     label="$(tr '[:lower:]' '[:upper:]' <<< ${pattern:0:1})${pattern:1}"
-    print_row "$label" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+    print_row "$label" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 done
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
@@ -272,19 +286,19 @@ key="find_10m_early_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "find (early exit)" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "find (early exit)" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 key="position_10m_early_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "position (early)" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "position (early)" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 key="position_10m_mid_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "position (middle)" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "position (middle)" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
 
@@ -301,19 +315,19 @@ key="any_10m_early_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "any (early exit)" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "any (early exit)" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 key="any_10m_full_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "any (full scan)" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "any (full scan)" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 key="all_10m_pass_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "all (pass)" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "all (pass)" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
 
@@ -330,13 +344,13 @@ key="min_by_key_10m_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "minByKey" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "minByKey" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 key="max_by_key_10m_us"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "maxByKey" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "maxByKey" "$(fmt_val "$b" "µs")" "$(fmt_val "$r" "µs")" "$diff" $W1 $W2 $W3 $W4
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
 
@@ -353,31 +367,63 @@ key="chunks_10m_1000_ms"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "chunks(1000) + sum" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "chunks(1000) + sum" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 
 key="enumerate_10m_ms"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "enumerate + forEach" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "enumerate + forEach" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 
 key="chain_2x5m_ms"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "chain(2×5M) + sum" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "chain(2×5M) + sum" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 
 key="zip_10m_ms"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "zip + dot product" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "zip + dot product" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
 
 key="flatten_1000x10k_ms"
 b=$(get_blitz "$key")
 r=$(get_rayon "$key")
 diff=$(calc_diff "$b" "$r")
-print_row "flatten(1000×10k) + sum" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+print_row "flatten(1000×10k) + sum" "$(fmt_val "$b" "ms")" "$(fmt_val "$r" "ms")" "$diff" $W1 $W2 $W3 $W4
+
+hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. Resource Usage
+# ─────────────────────────────────────────────────────────────────────────────
+section_header "9. RESOURCE USAGE (lower is better)"
+
+hline "$TL" "$TT" "$TR" $W1 $W2 $W3 $W4
+print_row "Metric" "Blitz" "Rayon" "Difference" $W1 $W2 $W3 $W4
+hline "$LT" "$X" "$RT" $W1 $W2 $W3 $W4
+
+key="peak_memory_kb"
+b=$(get_blitz "$key")
+r=$(get_rayon "$key")
+# Format as MB for readability
+b_mb=$(echo "scale=1; ${b:-0} / 1024" | bc 2>/dev/null || echo "0")
+r_mb=$(echo "scale=1; ${r:-0} / 1024" | bc 2>/dev/null || echo "0")
+diff=$(calc_diff "$b" "$r")
+print_row "Peak Memory" "$(fmt_val "$b_mb" "MB")" "$(fmt_val "$r_mb" "MB")" "$diff" $W1 $W2 $W3 $W4
+
+key="voluntary_ctx_switches"
+b=$(get_blitz "$key")
+r=$(get_rayon "$key")
+diff=$(calc_diff "$b" "$r")
+print_row "Voluntary Ctx Sw" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
+
+key="involuntary_ctx_switches"
+b=$(get_blitz "$key")
+r=$(get_rayon "$key")
+diff=$(calc_diff "$b" "$r")
+print_row "Involuntary Ctx Sw" "${b:-N/A}" "${r:-N/A}" "$diff" $W1 $W2 $W3 $W4
 
 hline "$BL" "$BT" "$BR" $W1 $W2 $W3 $W4
 

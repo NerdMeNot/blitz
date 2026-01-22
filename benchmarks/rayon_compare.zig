@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const blitz = @import("blitz");
+const posix = std.posix;
 
 // ============================================================================
 // Configuration
@@ -46,6 +47,26 @@ const JsonWriter = struct {
         std.debug.print(fmt, args);
     }
 };
+
+// ============================================================================
+// Resource Usage
+// ============================================================================
+
+const ResourceUsage = struct {
+    peak_memory_kb: i64,
+    voluntary_ctx_switches: i64,
+    involuntary_ctx_switches: i64,
+};
+
+fn getResourceUsage() ResourceUsage {
+    const RUSAGE_SELF: i32 = 0;
+    const ru = posix.getrusage(RUSAGE_SELF);
+    return .{
+        .peak_memory_kb = @divTrunc(ru.maxrss, 1024), // Convert to KB (macOS reports bytes)
+        .voluntary_ctx_switches = ru.nvcsw,
+        .involuntary_ctx_switches = ru.nivcsw,
+    };
+}
 
 // ============================================================================
 // Benchmark Utilities
@@ -500,6 +521,17 @@ pub fn main() !void {
 
         json.key("flatten_1000x10k_ms");
         json.value("{d:.2}", .{@as(f64, @floatFromInt(benchmark(flattenSumBench, .{}))) / 1_000_000.0});
+    }
+
+    // Resource usage
+    {
+        const ru = getResourceUsage();
+        json.key("peak_memory_kb");
+        json.value("{d}", .{ru.peak_memory_kb});
+        json.key("voluntary_ctx_switches");
+        json.value("{d}", .{ru.voluntary_ctx_switches});
+        json.key("involuntary_ctx_switches");
+        json.value("{d}", .{ru.involuntary_ctx_switches});
     }
 
     json.end();
