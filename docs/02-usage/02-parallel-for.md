@@ -163,10 +163,10 @@ blitz.parallelFor(src.len, Ctx, .{ .src = src, .dst = dst, .scale = 2.0 }, struc
 - **Memory-bound ops**: May not scale with cores
 - **Shared mutable state**: Race conditions!
 
-Use `blitz.shouldParallelize()` to decide automatically:
+Use `blitz.internal.shouldParallelize()` to decide automatically:
 
 ```zig
-if (blitz.shouldParallelize(.transform, data.len)) {
+if (blitz.internal.shouldParallelize(.transform, data.len)) {
     blitz.parallelFor(data.len, ctx_type, ctx, bodyFn);
 } else {
     // Sequential fallback

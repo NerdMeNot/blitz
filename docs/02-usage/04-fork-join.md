@@ -1,6 +1,6 @@
 # Fork-Join
 
-Execute two tasks potentially in parallel and collect results.
+Execute multiple tasks potentially in parallel and collect results. This is the foundation of divide-and-conquer parallelism.
 
 ## Basic Usage
 
@@ -19,30 +19,25 @@ fn computeB(n: u32) u64 {
     return sum;
 }
 
-pub fn main() !void {
-    try blitz.init();
-    defer blitz.deinit();
+pub fn main() void {
+    // Join two tasks - B may run in parallel with A
+    const result = blitz.join(.{
+        .a = .{ computeA, @as(u32, 1_000_000) },
+        .b = .{ computeB, @as(u32, 1_000_000) },
+    });
 
-    const results = blitz.join(
-        u64,        // Return type A
-        u64,        // Return type B
-        computeA,   // Function A
-        computeB,   // Function B
-        1_000_000,  // Argument for A
-        1_000_000,  // Argument for B
-    );
-
-    // results[0] = computeA(1_000_000)
-    // results[1] = computeB(1_000_000)
-    const total = results[0] + results[1];
+    // Access results by field name
+    const total = result.a + result.b;
 }
 ```
+
+No explicit initialization required - Blitz auto-initializes on first use.
 
 ## How It Works
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                  join(A, B)                     │
+│                  join(.{.a, .b})                 │
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │  1. Fork: Push B to deque (may be stolen)       │
@@ -59,26 +54,49 @@ pub fn main() !void {
 │     - If B not stolen: pop and run locally      │
 │     - If B stolen: wait for thief to finish     │
 │                                                 │
-│  4. Return [resultA, resultB]                   │
+│  4. Return .{ .a = resultA, .b = resultB }      │
 │                                                 │
 └─────────────────────────────────────────────────┘
 ```
 
-## Void Functions
+## Multiple Tasks
 
-For functions that don't return values:
+### Two Tasks
 
 ```zig
-blitz.joinVoid(
-    processChunkA,  // fn(ArgA) void
-    processChunkB,  // fn(ArgB) void
-    chunkA,
-    chunkB,
-);
-// Both complete before returning
+const result = blitz.join(.{
+    .left = .{ computeLeft, left_data },
+    .right = .{ computeRight, right_data },
+});
+// Access: result.left, result.right
 ```
 
-## Different Argument Types
+### Three Tasks
+
+```zig
+const result = blitz.join(.{
+    .first = .{ task1, arg1 },
+    .second = .{ task2, arg2 },
+    .third = .{ task3, arg3 },
+});
+// Access: result.first, result.second, result.third
+```
+
+### Many Tasks (Up to 8)
+
+```zig
+const result = blitz.join(.{
+    .a = .{ taskA, argA },
+    .b = .{ taskB, argB },
+    .c = .{ taskC, argC },
+    .d = .{ taskD, argD },
+    // ... up to 8 tasks
+});
+```
+
+## Different Return Types
+
+Functions can return different types:
 
 ```zig
 fn processStrings(strings: []const []const u8) usize {
@@ -91,47 +109,70 @@ fn processNumbers(numbers: []const i64) i64 {
     return sum;
 }
 
-const results = blitz.join(
-    usize,          // Return type A
-    i64,            // Return type B
-    processStrings,
-    processNumbers,
-    strings,        // []const []const u8
-    numbers,        // []const i64
-);
+const result = blitz.join(.{
+    .count = .{ processStrings, strings },  // Returns usize
+    .sum = .{ processNumbers, numbers },     // Returns i64
+});
+
+// result.count: usize
+// result.sum: i64
+```
+
+## Void Functions
+
+For functions that don't return values, the result fields are `void`:
+
+```zig
+fn processChunkA(chunk: []u8) void {
+    for (chunk) |*c| c.* *= 2;
+}
+
+fn processChunkB(chunk: []u8) void {
+    for (chunk) |*c| c.* += 1;
+}
+
+_ = blitz.join(.{
+    .a = .{ processChunkA, chunk_a },
+    .b = .{ processChunkB, chunk_b },
+});
+// Both complete before returning
 ```
 
 ## Recursive Fork-Join (Divide and Conquer)
 
-Classic parallel fibonacci:
+### Parallel Fibonacci
 
 ```zig
-fn fibPar(n: u64) u64 {
-    // Base case: don't parallelize small subproblems
-    if (n <= 20) return fibSeq(n);
+fn parallelFib(n: u64) u64 {
+    // CRITICAL: Sequential threshold prevents overhead explosion
+    if (n < 20) return fibSequential(n);
 
-    // Fork fib(n-1), execute fib(n-2) locally
-    const results = blitz.join(u64, u64, fibPar, fibPar, n - 1, n - 2);
-    return results[0] + results[1];
+    const r = blitz.join(.{
+        .a = .{ parallelFib, n - 1 },
+        .b = .{ parallelFib, n - 2 },
+    });
+    return r.a + r.b;
 }
 
-fn fibSeq(n: u64) u64 {
+fn fibSequential(n: u64) u64 {
     if (n <= 1) return n;
-    return fibSeq(n - 1) + fibSeq(n - 2);
+    return fibSequential(n - 1) + fibSequential(n - 2);
 }
 ```
 
-**Performance (fib(40) on 10 cores):**
-- Sequential: 635 ms
-- Parallel: 93 ms
-- Speedup: 6.9x
+**Performance (fib(45) on 10 cores):**
 
-## Parallel Merge Sort
+| Method | Time | Speedup |
+|--------|------|---------|
+| Sequential | 635 ms | 1.0x |
+| Parallel (threshold=20) | 93 ms | 6.9x |
+
+### Parallel Merge Sort
 
 ```zig
 fn parallelMergeSort(data: []i64, temp: []i64) void {
+    // Sequential for small arrays
     if (data.len <= 1024) {
-        // Sequential for small arrays
         std.mem.sort(i64, data, {}, std.sort.asc(i64));
         return;
     }
@@ -139,74 +180,176 @@ fn parallelMergeSort(data: []i64, temp: []i64) void {
     const mid = data.len / 2;
 
     // Sort halves in parallel
-    blitz.joinVoid(
-        struct {
-            fn sortLeft(args: struct { d: []i64, t: []i64 }) void {
+    _ = blitz.join(.{
+        .left = .{ struct {
+            fn sort(args: struct { d: []i64, t: []i64 }) void {
                 parallelMergeSort(args.d, args.t);
             }
-        }.sortLeft,
-        struct {
-            fn sortRight(args: struct { d: []i64, t: []i64 }) void {
+        }.sort, .{ .d = data[0..mid], .t = temp[0..mid] } },
+        .right = .{ struct {
+            fn sort(args: struct { d: []i64, t: []i64 }) void {
                 parallelMergeSort(args.d, args.t);
             }
-        }.sortRight,
-        .{ .d = data[0..mid], .t = temp[0..mid] },
-        .{ .d = data[mid..], .t = temp[mid..] },
-    );
+        }.sort, .{ .d = data[mid..], .t = temp[mid..] } },
+    });
 
-    // Merge (could also parallelize this)
+    // Merge sorted halves
     merge(data[0..mid], data[mid..], temp);
     @memcpy(data, temp);
 }
 ```
 
-## Multiple Tasks (join2, join3, joinN)
+### Parallel Tree Reduction
 
 ```zig
-// Two tasks (same as join)
-const r2 = blitz.join2(T1, T2, fn1, fn2);
+fn parallelSum(data: []const i64) i64 {
+    if (data.len < 1000) {
+        var sum: i64 = 0;
+        for (data) |v| sum += v;
+        return sum;
+    }
 
-// Three tasks
-const r3 = blitz.join3(T1, T2, T3, fn1, fn2, fn3);
-
-// N tasks (all same return type)
-const funcs = [_]fn() i64{ task1, task2, task3, task4 };
-const results = blitz.joinN(i64, 4, &funcs);
+    const mid = data.len / 2;
+    const r = blitz.join(.{
+        .left = .{ parallelSum, data[0..mid] },
+        .right = .{ parallelSum, data[mid..] },
+    });
+    return r.left + r.right;
+}
 ```
+
+## Sequential Threshold
+
+**Always set a sequential threshold** in recursive fork-join:
+
+```zig
+// GOOD: Has threshold
+fn goodFib(n: u64) u64 {
+    if (n < 20) return fibSeq(n);  // ← Threshold!
+    const r = blitz.join(.{...});
+    return r.a + r.b;
+}
+
+// BAD: No threshold - exponential overhead
+fn badFib(n: u64) u64 {
+    if (n <= 1) return n;
+    const r = blitz.join(.{...});  // ← Spawns task even for n=2!
+    return r.a + r.b;
+}
+```
+
+Threshold guidelines:
+
+| Algorithm | Recommended Threshold |
+|-----------|----------------------|
+| Fibonacci | n < 20 |
+| Merge sort | len < 1024 |
+| Tree operations | nodes < 100-1000 |
+| General | Switch when overhead > work |
 
 ## When to Use Fork-Join
 
-**Good for:**
-- Recursive divide-and-conquer (sort, fibonacci, tree traversal)
-- Two independent computations
-- When result of one doesn't depend on other
+### Good For
 
-**Not ideal for:**
-- Many small tasks (use parallelFor instead)
-- Sequential dependencies
-- Very unbalanced workloads
+- **Recursive divide-and-conquer**: sort, fibonacci, tree traversal
+- **Two independent computations**: results don't depend on each other
+- **Heterogeneous tasks**: different operations, different types
+- **Nested parallelism**: recursive algorithms that spawn subtasks
 
-## Fork-Join vs ParallelFor
+### Not Ideal For
 
-| Use Case | Best Choice |
-|----------|-------------|
-| Process array elements | parallelFor |
-| Two independent tasks | join |
-| Recursive tree structure | join |
-| N homogeneous chunks | parallelFor |
-| N heterogeneous tasks | joinN |
+- **Many small independent tasks**: use `parallelFor` instead
+- **Sequential dependencies**: one task needs another's result
+- **Very unbalanced workloads**: one task much larger than others
+- **Single elements**: overhead exceeds benefit
+
+## Fork-Join vs Other APIs
+
+| Use Case | Best Choice | Why |
+|----------|-------------|-----|
+| Process array elements | `iter().forEach()` | Optimized for data parallelism |
+| Sum/min/max array | `iter().sum()` | SIMD-optimized |
+| Two independent tasks | `join(.{...})` | Named results |
+| Recursive tree structure | `join(.{...})` | Natural recursion |
+| Transform elements | `iterMut().mapInPlace()` | In-place, parallel |
+| Search for element | `iter().findAny()` | Early exit |
 
 ## Performance Characteristics
 
-- **Fork overhead**: ~1-10 ns (lock-free)
-- **Join overhead**: ~1-10 ns if not stolen, ~50 ns if stolen
-- **Scaling**: Near-linear for compute-bound work
+| Operation | Typical Time | Notes |
+|-----------|-------------|-------|
+| Fork (push to deque) | ~3 ns | Wait-free |
+| Join (local, not stolen) | ~5 ns | Pop from deque |
+| Join (stolen, complete) | ~3 ns | Latch check only |
+| Join (stolen, waiting) | ~10-50 ns | Work-stealing while waiting |
+| Full fork-join cycle | ~10-20 ns | Amortized |
 
 ```
-Fork-Join Performance (10 workers):
-┌────────────────────────────────────┐
-│ Depth 20, 2M forks: 0.54 ns/fork   │
-│ Parallel fib(45): 6.9x speedup     │
-│ Recursive sort 10M: 8x speedup     │
-└────────────────────────────────────┘
+Fork-Join Scaling (10 workers, fib(n)):
+┌──────────────────────────────────────────┐
+│ Depth 10:  10.54 ms (1M forks)           │
+│ Depth 15:   1.29 ms                      │
+│ Depth 20:   0.54 ms (1M forks)           │
+│ Scaling:    2.4x per 5 depth levels      │
+└──────────────────────────────────────────┘
 ```
+
+## Common Patterns
+
+### Pattern 1: Binary Split
+
+```zig
+fn process(data: []T) Result {
+    if (data.len < threshold) return processSeq(data);
+    const mid = data.len / 2;
+    const r = blitz.join(.{
+        .left = .{ process, data[0..mid] },
+        .right = .{ process, data[mid..] },
+    });
+    return combine(r.left, r.right);
+}
+```
+
+### Pattern 2: Multiple Operations on Same Data
+
+```zig
+const stats = blitz.join(.{
+    .sum = .{ computeSum, data },
+    .variance = .{ computeVariance, data },
+    .histogram = .{ computeHistogram, data },
+});
+```
+
+### Pattern 3: Pipeline Stages
+
+```zig
+// Stage 1: Load in parallel
+const r1 = blitz.join(.{
+    .a = .{ loadFile, "data1.bin" },
+    .b = .{ loadFile, "data2.bin" },
+});
+
+// Stage 2: Process in parallel
+const r2 = blitz.join(.{
+    .a = .{ process, r1.a },
+    .b = .{ process, r1.b },
+});
+
+// Stage 3: Combine
+const final = merge(r2.a, r2.b);
+```
+
+## Limitations
+
+1. **Stack-allocated futures**: Deep recursion can overflow stack
+2. **No cancellation**: Once forked, tasks run to completion
+3. **No priority**: All tasks have equal priority
+4. **Fixed parallelism**: Can't dynamically adjust task count
+
+## Best Practices
+
+1. **Always set sequential thresholds** in recursive code
+2. **Name fields meaningfully**: `.left`/`.right`, `.sum`/`.count`, etc.
+3. **Keep tasks balanced**: Similar work in each branch
+4. **Measure before optimizing**: Profile to find the right threshold
+5. **Use iterators for data parallelism**: Fork-join is for task parallelism

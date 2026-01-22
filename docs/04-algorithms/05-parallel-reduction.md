@@ -276,7 +276,7 @@ Parallel + SIMD       1.2 ms     29.3x
 Use threshold heuristics:
 
 ```zig
-if (blitz.shouldParallelize(.sum, data.len)) {
+if (blitz.internal.shouldParallelize(.sum, data.len)) {
     return parallelReduce(...);
 } else {
     return sequentialReduce(...);

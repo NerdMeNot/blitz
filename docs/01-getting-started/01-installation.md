@@ -4,7 +4,7 @@ Blitz is a pure Zig library with no external dependencies.
 
 ## Requirements
 
-- Zig 0.13.0 or later
+- Zig 0.15.0 or later
 - POSIX-compatible OS (Linux, macOS) or Windows
 
 ## Adding Blitz to Your Project

@@ -5,11 +5,71 @@
 
 **Rayon-style parallelism for Zig. Simple API, serious performance.**
 
+Blitz brings the ergonomics of Rust's Rayon library to Zig, with a focus on:
+- **Zero-allocation fork-join**: Stack-allocated futures, no heap overhead
+- **Lock-free work stealing**: Chase-Lev deques with futex-based wake
+- **Composable iterators**: Chain, zip, flatten with automatic parallelism
+- **SIMD acceleration**: Vectorized aggregations where applicable
+
 ```zig
 const blitz = @import("blitz");
 
-// That's it. Sum 10 million numbers in parallel.
+// Sum 10 million numbers in parallel - one line
 const sum = blitz.iter(i64, data).sum();
+```
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [API Reference](#api-reference)
+  - [Parallel Iterators](#parallel-iterators)
+  - [Fork-Join](#fork-join)
+  - [Parallel Algorithms](#parallel-algorithms)
+- [Performance](#performance)
+- [Architecture](#architecture)
+- [Best Practices](#best-practices)
+- [Limitations](#limitations)
+- [Documentation](#documentation)
+
+## Installation
+
+### Requirements
+
+- Zig 0.15.0 or later
+- Linux, macOS, or Windows
+
+### Using Zig Package Manager
+
+Add to your `build.zig.zon`:
+
+```zig
+.dependencies = .{
+    .blitz = .{
+        .url = "https://github.com/NerdMeNot/blitz/archive/refs/tags/v1.0.0-zig0.15.2.tar.gz",
+        .hash = "...", // zig build will provide this
+    },
+},
+```
+
+Add to your `build.zig`:
+
+```zig
+const blitz_dep = b.dependency("blitz", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("blitz", blitz_dep.module("blitz"));
+```
+
+### Building from Source
+
+```bash
+git clone https://github.com/NerdMeNot/blitz.git
+cd blitz
+zig build        # Build library
+zig build test   # Run tests
+zig build bench  # Run benchmarks
 ```
 
 ## Quick Start
@@ -18,301 +78,584 @@ const sum = blitz.iter(i64, data).sum();
 const blitz = @import("blitz");
 
 pub fn main() !void {
-    // Parallel sum
-    const sum = blitz.iter(i64, numbers).sum();
+    var numbers = [_]i64{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
 
-    // Parallel min/max
-    const min = blitz.iter(i64, numbers).min();
-    const max = blitz.iter(i64, numbers).max();
+    // ============================================
+    // PARALLEL AGGREGATIONS
+    // ============================================
 
-    // Parallel search with early exit
-    const found = blitz.iter(i64, numbers).findAny(isTarget);
+    // Sum all elements
+    const sum = blitz.iter(i64, &numbers).sum();
 
-    // Parallel predicates
-    const has_negative = blitz.iter(i64, numbers).any(isNegative);
-    const all_positive = blitz.iter(i64, numbers).all(isPositive);
+    // Find min/max
+    const min = blitz.iter(i64, &numbers).min();  // -> ?i64
+    const max = blitz.iter(i64, &numbers).max();  // -> ?i64
 
-    // Parallel transform (in-place)
-    blitz.iterMut(i64, numbers).mapInPlace(double);
-    blitz.iterMut(i64, numbers).fill(0);
+    // Custom reduction
+    const product = blitz.iter(i64, &numbers).reduce(1, multiply);
 
-    // Parallel sort
-    try blitz.parallelSort(i64, numbers, allocator);
+    // ============================================
+    // PARALLEL SEARCH (with early exit)
+    // ============================================
+
+    // Find any element matching predicate (fastest, non-deterministic order)
+    const found = blitz.iter(i64, &numbers).findAny(isEven);
+
+    // Find first/last match (deterministic, scans all chunks)
+    const first = blitz.iter(i64, &numbers).findFirst(isEven);
+    const last = blitz.iter(i64, &numbers).findLast(isEven);
+
+    // Get index of match
+    const idx = blitz.iter(i64, &numbers).position(isEven);
+
+    // ============================================
+    // PARALLEL PREDICATES (with early exit)
+    // ============================================
+
+    const has_negative = blitz.iter(i64, &numbers).any(isNegative);
+    const all_positive = blitz.iter(i64, &numbers).all(isPositive);
+
+    // ============================================
+    // PARALLEL TRANSFORMS (in-place mutation)
+    // ============================================
+
+    // Double every element
+    blitz.iterMut(i64, &numbers).mapInPlace(double);
+
+    // Fill with a value
+    blitz.iterMut(i64, &numbers).fill(0);
+
+    // Execute side effect for each
+    blitz.iterMut(i64, &numbers).forEach(printValue);
+
+    // ============================================
+    // PARALLEL SORT
+    // ============================================
+
+    // Sort ascending (in-place, no allocation needed)
+    blitz.sortAsc(i64, &numbers);
+
+    // With custom comparator
+    blitz.sort(i64, &numbers, descending);
 }
 
-fn isTarget(x: i64) bool { return x == 42; }
+fn multiply(a: i64, b: i64) i64 { return a * b; }
+fn isEven(x: i64) bool { return @mod(x, 2) == 0; }
 fn isNegative(x: i64) bool { return x < 0; }
 fn isPositive(x: i64) bool { return x > 0; }
 fn double(x: i64) i64 { return x * 2; }
+fn printValue(x: *i64) void { std.debug.print("{} ", .{x.*}); }
+fn descending(a: i64, b: i64) bool { return a > b; }
 ```
-
-## Installation
-
-Add to `build.zig.zon`:
-
-```zig
-.dependencies = .{
-    .blitz = .{
-        .url = "https://github.com/NerdMeNot/blitz/archive/refs/tags/v1.0.0-zig0.15.2.tar.gz",
-        .hash = "...", // zig build will tell you
-    },
-},
-```
-
-Add to `build.zig`:
-
-```zig
-const blitz_dep = b.dependency("blitz", .{ .target = target, .optimize = optimize });
-exe.root_module.addImport("blitz", blitz_dep.module("blitz"));
-```
-
-**Requirements:** Zig 0.15.0+, Linux/macOS/Windows
 
 ## API Reference
 
-### Iterators (Primary API)
+### Parallel Iterators
 
-The iterator API is the simplest way to use Blitz:
+The iterator API is the recommended way to use Blitz. It provides composable, chainable operations that automatically parallelize.
+
+#### Creating Iterators
 
 ```zig
-const blitz = @import("blitz");
+// From slice (immutable - for reading)
+const it = blitz.iter(T, slice);
 
-// Create iterator from slice
-const it = blitz.iter(T, slice);      // immutable
-const it = blitz.iterMut(T, slice);   // mutable
-const it = blitz.range(start, end);   // index range
+// From slice (mutable - for writing)
+const it = blitz.iterMut(T, slice);
+
+// From index range
+const it = blitz.range(start, end);
 ```
 
 #### Aggregations
 
+| Method | Return Type | Description |
+|--------|-------------|-------------|
+| `.sum()` | `T` | Sum of all elements |
+| `.min()` | `?T` | Minimum element (null if empty) |
+| `.max()` | `?T` | Maximum element (null if empty) |
+| `.reduce(identity, fn)` | `T` | Custom reduction with binary function |
+| `.count()` | `usize` | Number of elements |
+
 ```zig
-blitz.iter(i64, data).sum()           // -> i64
-blitz.iter(i64, data).min()           // -> ?i64
-blitz.iter(i64, data).max()           // -> ?i64
-blitz.iter(i64, data).reduce(0, add)  // -> i64 (custom reducer)
+const data = [_]i64{ 1, 2, 3, 4, 5 };
+
+const sum = blitz.iter(i64, &data).sum();           // 15
+const min = blitz.iter(i64, &data).min();           // 1
+const max = blitz.iter(i64, &data).max();           // 5
+const prod = blitz.iter(i64, &data).reduce(1, mul); // 120
 ```
 
-#### Search (with early exit)
+#### Search Operations
+
+All search operations support **early exit** - they stop as soon as a match is found.
+
+| Method | Return Type | Description |
+|--------|-------------|-------------|
+| `.findAny(pred)` | `?T` | Any matching element (fastest) |
+| `.findFirst(pred)` | `?FindResult(T)` | Leftmost match with index |
+| `.findLast(pred)` | `?FindResult(T)` | Rightmost match with index |
+| `.position(pred)` | `?usize` | Index of first match |
+| `.positionAny(pred)` | `?usize` | Index of any match (fastest) |
+| `.rposition(pred)` | `?usize` | Index of last match |
 
 ```zig
-blitz.iter(T, data).findAny(pred)     // -> ?T (any match, fast)
-blitz.iter(T, data).findFirst(pred)   // -> ?FindResult(T) (leftmost)
-blitz.iter(T, data).findLast(pred)    // -> ?FindResult(T) (rightmost)
-blitz.iter(T, data).position(pred)    // -> ?usize (index of first match)
+const data = [_]i64{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+
+// Find any even number (non-deterministic, but fast)
+const any_even = blitz.iter(i64, &data).findAny(isEven);  // Some even number
+
+// Find first even number (deterministic)
+if (blitz.iter(i64, &data).findFirst(isEven)) |result| {
+    std.debug.print("First even: {} at index {}\n", .{ result.value, result.index });
+}
+
+// Find index
+const idx = blitz.iter(i64, &data).position(isEven);  // 1 (index of 2)
 ```
 
-#### Predicates (with early exit)
+#### Predicates
+
+| Method | Return Type | Description |
+|--------|-------------|-------------|
+| `.any(pred)` | `bool` | True if any element matches |
+| `.all(pred)` | `bool` | True if all elements match |
 
 ```zig
-blitz.iter(T, data).any(pred)         // -> bool (true if any match)
-blitz.iter(T, data).all(pred)         // -> bool (true if all match)
+const data = [_]i64{ 1, 2, 3, 4, 5 };
+
+const has_even = blitz.iter(i64, &data).any(isEven);     // true
+const all_positive = blitz.iter(i64, &data).all(isPos); // true
 ```
 
-#### Min/Max by Key
+#### Min/Max by Key or Comparator
 
 ```zig
-blitz.iter(T, data).minBy(comparator) // -> ?T
-blitz.iter(T, data).maxBy(comparator) // -> ?T
-blitz.iter(T, data).minByKey(K, keyFn)// -> ?T
-blitz.iter(T, data).maxByKey(K, keyFn)// -> ?T
+const Point = struct { x: i32, y: i32 };
+const points = [_]Point{ .{ .x = 1, .y = 5 }, .{ .x = 3, .y = 2 }, .{ .x = 2, .y = 8 } };
+
+// Min/max by custom comparator
+const closest = blitz.iter(Point, &points).minBy(compareByDistance);
+
+// Min/max by key extraction
+const leftmost = blitz.iter(Point, &points).minByKey(i32, getX);   // Point with smallest x
+const highest = blitz.iter(Point, &points).maxByKey(i32, getY);    // Point with largest y
+
+fn getX(p: Point) i32 { return p.x; }
+fn getY(p: Point) i32 { return p.y; }
 ```
 
-#### Mutation
+#### Mutation Operations
+
+These require `iterMut` (mutable iterator).
+
+| Method | Description |
+|--------|-------------|
+| `.mapInPlace(fn)` | Transform each element in place |
+| `.fill(value)` | Set all elements to a value |
+| `.forEach(fn)` | Execute function for each element |
 
 ```zig
-blitz.iterMut(T, data).mapInPlace(fn) // transform each element
-blitz.iterMut(T, data).fill(value)    // fill with value
-blitz.iterMut(T, data).forEach(fn)    // execute fn for each
+var data = [_]i64{ 1, 2, 3, 4, 5 };
+
+// Double all elements
+blitz.iterMut(i64, &data).mapInPlace(double);  // [2, 4, 6, 8, 10]
+
+// Reset to zero
+blitz.iterMut(i64, &data).fill(0);  // [0, 0, 0, 0, 0]
 ```
 
-#### Combinators
+#### Iterator Combinators
 
 ```zig
-blitz.iter(T, a).chain(blitz.iter(T, b))  // concatenate
-blitz.iter(T, a).zip(blitz.iter(U, b))    // pair elements
-blitz.flatten(slices)                      // flatten nested slices
+const a = [_]i64{ 1, 2, 3 };
+const b = [_]i64{ 4, 5, 6 };
+
+// Chain: concatenate two iterators
+const sum = blitz.iter(i64, &a).chain(blitz.iter(i64, &b)).sum();  // 21
+
+// Zip: pair elements from two iterators
+const pairs = blitz.iter(i64, &a).zip(blitz.iter(i64, &b));
+// Iterates over: (1,4), (2,5), (3,6)
+
+// Chunks: process in fixed-size chunks
+blitz.iter(i64, &data).chunks(100).forEach(processChunk);
+
+// Enumerate: with indices
+blitz.iter(i64, &data).enumerate().forEach(processWithIndex);
+
+// Flatten: flatten nested slices
+const nested = [_][]const i64{ &a, &b };
+const flat_sum = blitz.flatten([]const i64, &nested).sum();  // 21
 ```
 
 ### Fork-Join
 
-For divide-and-conquer algorithms:
+For divide-and-conquer algorithms and heterogeneous parallel tasks.
+
+#### `blitz.join()` - Parallel Task Execution
+
+Execute multiple tasks in parallel with potentially different return types. Similar to JavaScript's `Promise.all()` but with named results.
 
 ```zig
-// Execute two functions in parallel
-const result = blitz.join(u64, u64, computeLeft, computeRight, left_arg, right_arg);
-// result[0] = computeLeft(left_arg)
-// result[1] = computeRight(right_arg)
+// Simple: function pointers (no arguments)
+const result = blitz.join(.{
+    .user = fetchUser,
+    .posts = fetchPosts,
+    .comments = fetchComments,
+});
+// Access: result.user, result.posts, result.comments
 
-// Classic example: parallel fibonacci
-fn fib(n: u64) u64 {
+// With arguments: tuple of (function, argument)
+const result = blitz.join(.{
+    .user = .{ fetchUserById, user_id },
+    .posts = .{ fetchPostsByUser, user_id },
+    .config = .{ loadConfig, "app.json" },
+});
+```
+
+#### Recursive Fork-Join (Divide and Conquer)
+
+```zig
+fn parallelFib(n: u64) u64 {
+    // Base case: below threshold, compute sequentially
     if (n < 20) return fibSequential(n);
-    const r = blitz.join(u64, u64, fib, fib, n - 1, n - 2);
-    return r[0] + r[1];
+
+    // Recursive case: fork two subtasks
+    const r = blitz.join(.{
+        .a = .{ parallelFib, n - 1 },
+        .b = .{ parallelFib, n - 2 },
+    });
+    return r.a + r.b;
+}
+
+fn parallelMergeSort(comptime T: type, data: []T, allocator: Allocator) void {
+    if (data.len <= 1024) {
+        std.mem.sort(T, data, {}, std.sort.asc(T));
+        return;
+    }
+
+    const mid = data.len / 2;
+
+    // Sort both halves in parallel
+    _ = blitz.join(.{
+        .left = .{ parallelMergeSort, T, data[0..mid], allocator },
+        .right = .{ parallelMergeSort, T, data[mid..], allocator },
+    });
+
+    merge(data, mid, allocator);
 }
 ```
 
-#### Multiple Tasks
+#### `blitz.scope()` - Dynamic Task Spawning
+
+For when the number of tasks is determined at runtime:
 
 ```zig
-// 2 tasks, different return types
-const r = blitz.join2(i32, i64, fnA, fnB);
-
-// 3 tasks, different return types
-const r = blitz.join3(i32, i64, f64, fnA, fnB, fnC);
-
-// N tasks, same return type
-const funcs = [_]fn() i64{ fn1, fn2, fn3, fn4 };
-const results = blitz.joinN(i64, 4, &funcs);
-
-// Spawn up to 64 tasks dynamically
 blitz.scope(struct {
     fn run(s: *blitz.Scope) void {
-        s.spawn(task1);
-        s.spawn(task2);
-        s.spawn(task3);
+        // Spawn tasks dynamically (up to 64)
+        for (work_items) |item| {
+            s.spawn(.{ processItem, item });
+        }
     }
 }.run);
+// All spawned tasks complete before scope returns
+```
+
+#### Error-Safe Join
+
+```zig
+// Task B always completes even if A fails
+const result = try blitz.tryJoin(
+    ResultA, ResultB, MyError,
+    taskA, taskB,
+    argA, argB,
+);
 ```
 
 ### Parallel Algorithms
 
-```zig
-// Sort
-try blitz.parallelSort(i64, data, allocator);
-try blitz.parallelSortBy(i64, data, allocator, lessThan);
-
-// Scan (prefix sum)
-blitz.parallelScan(i64, input, output);          // inclusive
-blitz.parallelScanExclusive(i64, input, output); // exclusive
-
-// Find
-blitz.parallelFind(i64, data, predicate);        // -> ?usize
-blitz.parallelFindValue(i64, data, value);       // -> ?usize
-
-// Partition
-blitz.parallelPartition(i64, data, predicate);   // -> pivot index
-```
-
-### Range Iteration
+#### Sorting
 
 ```zig
-// Parallel for over indices
-blitz.range(0, 1000).forEach(processIndex);
+// Sort ascending (in-place, no allocation needed)
+blitz.sortAsc(i64, data);
 
-// With sum
-const total = blitz.range(0, 100).sum(i64, valueAt);
+// Sort descending
+blitz.sortDesc(i64, data);
 
-// For-range with context
-blitz.parallelForRange(0, n, processIndex);
+// Custom comparator
+blitz.sort(i64, data, struct {
+    fn lessThan(a: i64, b: i64) bool {
+        return a > b;  // Descending
+    }
+}.lessThan);
+
+// Sort by key
+blitz.sortByKey(Person, u32, people, struct {
+    fn key(p: Person) u32 { return p.age; }
+}.key);
 ```
 
-### Error Handling
+**Algorithm**: Parallel Pattern-Defeating Quicksort (PDQSort)
+- Adaptive: O(n) for sorted/reverse-sorted data
+- Cache-friendly: good locality of reference
+- Parallel: work-stealing across cores
+
+#### Scan (Prefix Sum)
 
 ```zig
-// Error-safe join: task B always completes even if A fails
-const result = try blitz.tryJoin(u64, u64, MyError, fnA, fnB, argA, argB);
+const input = [_]i64{ 1, 2, 3, 4, 5 };
+var output: [5]i64 = undefined;
 
-// Error-safe iteration
-try blitz.tryForEach(...);
-try blitz.tryReduce(...);
+// Inclusive scan: output[i] = sum of input[0..i+1]
+blitz.parallelScan(i64, &input, &output);
+// output = [1, 3, 6, 10, 15]
+
+// Exclusive scan: output[i] = sum of input[0..i]
+blitz.parallelScanExclusive(i64, &input, &output);
+// output = [0, 1, 3, 6, 10]
 ```
+
+#### Find and Partition
+
+```zig
+// Find index of first element matching predicate
+const idx = blitz.parallelFind(i64, data, isTarget);
+
+// Find index of specific value
+const idx = blitz.parallelFindValue(i64, data, 42);
+
+// Partition: move elements matching predicate to front
+const pivot = blitz.parallelPartition(i64, data, isNegative);
+// data[0..pivot] are negative, data[pivot..] are non-negative
+```
+
+### Configuration
+
+#### Initialization
+
+Blitz auto-initializes on first use with default settings. For custom configuration:
+
+```zig
+// Explicit initialization with custom thread count
+try blitz.initWithConfig(.{
+    .background_worker_count = 8,  // Use 8 worker threads
+});
+defer blitz.deinit();
+
+// Or auto-detect (uses CPU count - 1)
+try blitz.init();
+defer blitz.deinit();
+```
+
+#### Grain Size Control
+
+The grain size controls the minimum work unit size. Smaller values = more parallelism but more overhead.
+
+```zig
+// Set globally
+blitz.setGrainSize(1024);
+
+// Query current value
+const grain = blitz.getGrainSize();
+
+// Per-operation grain size
+blitz.parallelForWithGrain(n, ctx, body, 512);
+```
+
+**Guidelines**:
+- Default (4096) works well for most cases
+- Reduce for expensive operations (100-1000)
+- Increase for trivial operations (10000+)
 
 ## Performance
 
-Blitz matches or beats Rayon on most workloads:
+Benchmarks on 10-core Apple M1 Pro, comparing Blitz to Rust's Rayon:
 
-| Benchmark | Blitz | Rayon | Winner |
-|-----------|-------|-------|--------|
-| Fork-join (2M forks) | 0.54 ns/fork | 0.66 ns/fork | Blitz +22% |
-| Parallel fib(45) | 411 ms | 414 ms | Tie |
-| Sum 10M | 0.78 ms | 0.80 ms | Blitz +3% |
-| Sort 1M | 3.55 ms | 3.80 ms | Blitz +7% |
+### Fork-Join Overhead
+
+| Depth | Blitz (ns/fork) | Rayon (ns/fork) | Speedup |
+|-------|-----------------|-----------------|---------|
+| 10 (1K forks) | 10.54 | 14.73 | **1.40x** |
+| 15 (32K forks) | 1.29 | 1.71 | **1.33x** |
+| 20 (1M forks) | 0.54 | 0.71 | **1.31x** |
+
+### Parallel Fibonacci
+
+| Workload | Blitz | Rayon | Speedup |
+|----------|-------|-------|---------|
+| fib(35) | 3.31 ms | 4.92 ms | **1.49x** |
+| fib(40) | 35.06 ms | 52.85 ms | **1.51x** |
+
+### Aggregations
+
+| Operation | Blitz | Rayon | Speedup |
+|-----------|-------|-------|---------|
+| Sum 10M | 0.88 ms | 1.40 ms | **1.59x** |
+| Find (early) | 11.1 μs | 18.3 μs | **1.65x** |
+| Any (early) | 10.1 μs | 15.7 μs | **1.56x** |
+
+### Sorting
+
+| Data Pattern | Blitz | Rayon | Speedup |
+|--------------|-------|-------|---------|
+| Random 1M | 4.05 ms | 3.46 ms | 0.85x |
+| Sorted 1M | 0.27 ms | 0.43 ms | **1.59x** |
+| Reverse 1M | 0.41 ms | 0.56 ms | **1.37x** |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         YOUR CODE                                │
-│  iter(data).sum() | join(a, b) | parallelSort() | range()       │
+│  iter(data).sum() | join(.{...}) | sortAsc() | range()             │
 └─────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
-│                      WORK STEALING                               │
-│  • Chase-Lev deques (lock-free push/pop/steal)                  │
-│  • Futex-based wake (no mutex on hot path)                      │
-│  • Adaptive work splitting                                       │
+│                      HIGH-LEVEL API (api.zig)                    │
+│  • Automatic grain size calculation                              │
+│  • Sequential/parallel threshold decisions                       │
+│  • Iterator combinators and transformations                      │
 └─────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
-│                      SIMD + THREADS                              │
-│  • Vectorized aggregations (sum, min, max)                      │
-│  • Automatic parallelism threshold                              │
+│                      FORK-JOIN LAYER (future.zig)                │
+│  • Stack-allocated futures (zero heap allocation)                │
+│  • Hybrid join: latch-first for stolen, pop-first for local      │
+│  • Active work-stealing while waiting                            │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────────┐
+│                      SCHEDULER (pool.zig, worker.zig)            │
+│  • Rayon-style idle/sleeping state tracking                      │
+│  • Smart wake: only wake sleepers when needed                    │
+│  • Progressive sleep: spin → yield → futex wait                  │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────────┐
+│                      LOCK-FREE PRIMITIVES                        │
+│  • Chase-Lev deque: wait-free push/pop, lock-free steal          │
+│  • 4-state OnceLatch: prevents missed wakes                      │
+│  • Cache-line aligned to prevent false sharing                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## When to Use Blitz
+### Key Design Decisions
 
-**Great for:**
-- Numeric computation (sum, min, max, transforms)
-- Sorting large arrays
-- Divide-and-conquer algorithms
-- Search with early termination
-- Data >100K elements
+1. **Lock-free wake via futex**: No mutex on the hot path. Wake overhead is ~5-10ns vs ~100-300ns with condition variables.
 
-**Less ideal for:**
-- I/O-bound work
-- Very small data (<10K elements)
-- Simple memory copies
+2. **Stack-allocated futures**: Jobs are embedded in the caller's stack frame. Zero heap allocation for fork-join operations.
 
-## Advanced Usage
+3. **Active work-stealing in join**: While waiting for a stolen job, the owner actively steals and executes other work. No idle cores.
 
-### Low-Level API
+4. **Hybrid join strategy**: Quick latch check (for fast stolen completions) + pop-first (for local jobs). Optimized for both shallow and deep recursion.
 
-For fine-grained control:
+5. **Comptime specialization**: All generics resolved at compile time. No virtual dispatch, full inlining possible.
+
+## Best Practices
+
+### Do
 
 ```zig
-// Manual grain size control
-blitz.parallelForWithGrain(n, Context, ctx, body, grain_size);
-blitz.parallelReduceWithGrain(...);
+// DO: Use iterators for data-parallel operations
+const sum = blitz.iter(i64, data).sum();
 
-// Direct SIMD access
-const sum = blitz.simdSum(i64, data);  // SIMD only, no threading
+// DO: Use join for heterogeneous tasks
+const result = blitz.join(.{
+    .data = .{ fetchData, url },
+    .config = loadConfig,
+});
+
+// DO: Set a sequential threshold for recursive algorithms
+fn recurse(data: []i64) i64 {
+    if (data.len < 1000) return sequentialCompute(data);
+    // ... parallel recursion
+}
+
+// DO: Use findAny when order doesn't matter (faster)
+const found = blitz.iter(i64, data).findAny(predicate);
 ```
 
-### Configuration
+### Don't
 
 ```zig
-// Custom thread count
-try blitz.initWithConfig(.{ .background_worker_count = 8 });
-defer blitz.deinit();
+// DON'T: Parallelize tiny workloads (overhead > benefit)
+const sum = blitz.iter(i64, tiny_array_of_10).sum();  // Use sequential
 
-// Adjust grain size globally
-blitz.setGrainSize(1024);
+// DON'T: Use shared mutable state without synchronization
+var counter: i64 = 0;
+blitz.iterMut(i64, data).forEach(|_| { counter += 1; });  // RACE CONDITION!
+
+// DON'T: Allocate heavily inside parallel loops
+blitz.iter(T, data).forEach(|item| {
+    var list = ArrayList.init(allocator);  // BAD: allocation contention
+});
+
+// DON'T: Recurse without a base case threshold
+fn badFib(n: u64) u64 {
+    if (n < 2) return n;
+    const r = blitz.join(.{ .a = .{ badFib, n-1 }, .b = .{ badFib, n-2 } });
+    return r.a + r.b;  // BAD: too many tiny tasks
+}
 ```
 
-## Project Structure
+### Tuning Tips
 
-```
-blitz/
-├── mod.zig          # Library entry point
-├── api.zig          # High-level API
-├── iter/            # Parallel iterators
-├── simd/            # SIMD-accelerated operations
-├── sort/            # Parallel sorting
-├── pool.zig         # Thread pool
-├── deque.zig        # Lock-free work-stealing deque
-├── future.zig       # Fork-join primitives
-└── scope.zig        # Scope-based parallelism
-```
+1. **Profile first**: Use `zig build bench` to measure actual performance
+2. **Adjust grain size**: Decrease for expensive ops, increase for cheap ops
+3. **Check data size**: Below ~10K elements, sequential may be faster
+4. **Minimize allocations**: Pre-allocate buffers, reuse memory
+5. **Avoid false sharing**: Don't have threads write to adjacent memory
 
-## Building
+## Limitations
 
-```bash
-zig build              # Build library
-zig build test         # Run tests
-zig build bench        # Run benchmarks
-```
+### Current Limitations
+
+1. **No async/await integration**: Blitz is for CPU-bound parallelism, not I/O-bound concurrency.
+
+2. **No nested pool support**: One global thread pool. Don't create multiple pools.
+
+3. **Fixed thread count**: Worker count is set at initialization and cannot be changed.
+
+4. **No priority scheduling**: All tasks have equal priority. No way to prioritize certain work.
+
+5. **Limited error propagation**: Errors in parallel tasks may be lost. Use `tryJoin` for error-safe operations.
+
+### Platform-Specific Notes
+
+- **Linux**: Full support, uses futex for efficient wake
+- **macOS**: Full support, uses ulock (futex equivalent)
+- **Windows**: Full support, uses WaitOnAddress
+
+### Memory Considerations
+
+- Each worker has a 256-slot deque (~2KB per worker)
+- Stack-allocated futures: ~32-64 bytes each on the stack
+- No heap allocation for standard fork-join operations
+
+## Documentation
+
+Full documentation is available in the `docs/` directory:
+
+- [Getting Started](docs/01-getting-started/) - Installation, quick start, concepts
+- [Usage Guide](docs/02-usage/) - Detailed usage for each feature
+- [API Reference](docs/03-api/) - Complete API documentation
+- [Algorithms](docs/04-algorithms/) - Internal algorithm details
+- [Testing](docs/05-testing/) - Running tests and benchmarks
+- [Internals](docs/06-internals/) - Architecture and implementation details
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
+
+## Acknowledgments
+
+- [Rayon](https://github.com/rayon-rs/rayon) - Inspiration for the API design and work-stealing approach
+- [Chase-Lev](https://www.dre.vanderbilt.edu/~schmidt/PDF/work-stealing-dequeue.pdf) - Work-stealing deque algorithm
+- [PDQSort](https://github.com/orlp/pdqsort) - Pattern-defeating quicksort algorithm

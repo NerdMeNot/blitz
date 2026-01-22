@@ -1,6 +1,29 @@
 # Quick Start
 
-Get parallel execution working in under 2 minutes.
+Get parallel execution working in under 5 minutes.
+
+## Installation
+
+Add Blitz to your `build.zig.zon`:
+
+```zig
+.dependencies = .{
+    .blitz = .{
+        .url = "https://github.com/jdz/blitz/archive/refs/tags/v1.0.0.tar.gz",
+        .hash = "...", // Get from error message on first build
+    },
+},
+```
+
+In `build.zig`:
+
+```zig
+const blitz = b.dependency("blitz", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("blitz", blitz.module("blitz"));
+```
 
 ## Hello Parallel World
 
@@ -18,25 +41,38 @@ pub fn main() !void {
 
 No initialization required. Blitz auto-initializes on first use.
 
-## Core Patterns
+## The Two APIs
 
-### 1. Parallel Aggregations
+Blitz provides two levels of abstraction:
+
+| API | Best For | Example |
+|-----|----------|---------|
+| **Iterators** (recommended) | Data processing, aggregations, transforms | `blitz.iter(T, data).sum()` |
+| **Fork-Join** | Divide-and-conquer, recursive algorithms | `blitz.join(.{...})` |
+
+## Iterator API (Recommended)
+
+### Aggregations
 
 ```zig
-const data: []i64 = getNumbers();
+const data: []const i64 = &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
 
-const sum = blitz.iter(i64, data).sum();
-const min = blitz.iter(i64, data).min();  // -> ?i64
-const max = blitz.iter(i64, data).max();  // -> ?i64
+const sum = blitz.iter(i64, data).sum();      // 55
+const min = blitz.iter(i64, data).min();      // ?i64 = 1
+const max = blitz.iter(i64, data).max();      // ?i64 = 10
+const count = blitz.iter(i64, data).count();  // 10
 ```
 
-### 2. Parallel Search (with early exit)
+### Search (with early exit)
 
 ```zig
-// Find any match (fastest)
+// Find any match (fastest - non-deterministic order)
 const found = blitz.iter(i64, data).findAny(isNegative);
 
-// Check predicates
+// Find first match (deterministic)
+const first = blitz.iter(i64, data).findFirst(isNegative);
+
+// Check predicates (short-circuit on match)
 const has_negative = blitz.iter(i64, data).any(isNegative);
 const all_positive = blitz.iter(i64, data).all(isPositive);
 
@@ -44,46 +80,98 @@ fn isNegative(x: i64) bool { return x < 0; }
 fn isPositive(x: i64) bool { return x > 0; }
 ```
 
-### 3. Parallel Transform
+### Transform
 
 ```zig
-var data: []i64 = getNumbers();
+var data: [100]i64 = undefined;
+for (&data, 0..) |*v, i| v.* = @intCast(i);
 
 // Transform in-place
-blitz.iterMut(i64, data).mapInPlace(double);
+blitz.iterMut(i64, &data).mapInPlace(double);
 
 // Fill with value
-blitz.iterMut(i64, data).fill(0);
+blitz.iterMut(i64, &data).fill(0);
 
 fn double(x: i64) i64 { return x * 2; }
 ```
 
-### 4. Parallel Sort
+### Custom Reduce
+
+```zig
+const product = blitz.iter(i64, data).reduce(1, multiply);
+
+fn multiply(a: i64, b: i64) i64 { return a * b; }
+```
+
+## Fork-Join API
+
+### Two Tasks
+
+```zig
+const result = blitz.join(.{
+    .left = .{ computeLeft, left_data },
+    .right = .{ computeRight, right_data },
+});
+// Access: result.left, result.right
+```
+
+### Three or More Tasks
+
+```zig
+const result = blitz.join(.{
+    .a = .{ taskA, arg_a },
+    .b = .{ taskB, arg_b },
+    .c = .{ taskC, arg_c },
+});
+// Access: result.a, result.b, result.c
+```
+
+### Classic Fibonacci Example
+
+```zig
+fn parallelFib(n: u64) u64 {
+    // Switch to sequential below threshold
+    if (n < 20) return fibSequential(n);
+
+    const r = blitz.join(.{
+        .a = .{ parallelFib, n - 1 },
+        .b = .{ parallelFib, n - 2 },
+    });
+    return r.a + r.b;
+}
+
+fn fibSequential(n: u64) u64 {
+    if (n <= 1) return n;
+    return fibSequential(n - 1) + fibSequential(n - 2);
+}
+```
+
+## Parallel Sort
 
 ```zig
 var numbers = [_]i64{ 5, 2, 8, 1, 9, 3, 7, 4, 6 };
 
-try blitz.parallelSort(i64, &numbers, allocator);
+// Sort ascending (in-place, no allocation needed)
+blitz.sortAsc(i64, &numbers);
 // numbers is now [1, 2, 3, 4, 5, 6, 7, 8, 9]
-```
 
-### 5. Fork-Join (Divide and Conquer)
+// Sort descending
+blitz.sortDesc(i64, &numbers);
 
-```zig
-// Execute two computations in parallel
-const result = blitz.join(u64, u64, computeLeft, computeRight, left_arg, right_arg);
-// result[0] = computeLeft(left_arg)
-// result[1] = computeRight(right_arg)
+// Custom comparator
+blitz.sort(i64, &numbers, lessThan);
 
-// Classic example: parallel fibonacci
-fn fib(n: u64) u64 {
-    if (n < 20) return fibSequential(n);
-    const r = blitz.join(u64, u64, fib, fib, n - 1, n - 2);
-    return r[0] + r[1];
+fn lessThan(a: i64, b: i64) bool {
+    return a < b;
 }
+
+// Sort by key
+blitz.sortByKey(Person, u32, &people, getAge);
+
+fn getAge(p: Person) u32 { return p.age; }
 ```
 
-### 6. Range Iteration
+## Range Iteration
 
 ```zig
 // Process indices 0..999 in parallel
@@ -92,6 +180,41 @@ blitz.range(0, 1000).forEach(processIndex);
 fn processIndex(i: usize) void {
     // Process index i
 }
+
+// Sum a range
+const sum = blitz.range(0, 1000).sum(i64, identity);
+
+fn identity(i: usize) i64 { return @intCast(i); }
+```
+
+## Low-Level API
+
+For full control, use the low-level parallel primitives:
+
+```zig
+// Parallel for with context
+const Context = struct {
+    input: []const f64,
+    output: []f64,
+    scale: f64,
+};
+
+blitz.parallelFor(data.len, Context, ctx, struct {
+    fn body(c: Context, start: usize, end: usize) void {
+        for (c.input[start..end], c.output[start..end]) |in, *out| {
+            out.* = in * c.scale;
+        }
+    }
+}.body);
+
+// Parallel reduce
+const sum = blitz.parallelReduce(
+    i64,     // Output type
+    data,    // Input slice
+    0,       // Identity value
+    mapFn,   // Per-chunk computation
+    reduceFn // Combine partial results
+);
 ```
 
 ## Complete Example
@@ -101,33 +224,96 @@ const std = @import("std");
 const blitz = @import("blitz");
 
 pub fn main() !void {
-    // Generate some data
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Generate data
     var data: [1_000_000]i64 = undefined;
     for (&data, 0..) |*v, i| {
         v.* = @intCast(i);
     }
 
-    // Parallel operations
+    // Parallel aggregations
     const sum = blitz.iter(i64, &data).sum();
     const min = blitz.iter(i64, &data).min();
     const max = blitz.iter(i64, &data).max();
+    std.debug.print("Sum: {}, Min: {?}, Max: {?}\n", .{ sum, min, max });
 
-    std.debug.print("Sum: {}, Min: {}, Max: {}\n", .{ sum, min, max });
-
-    // Transform in parallel
+    // Parallel transform
     blitz.iterMut(i64, &data).mapInPlace(square);
 
-    // Check result
-    const all_positive = blitz.iter(i64, &data).all(isPositive);
-    std.debug.print("All positive after squaring: {}\n", .{all_positive});
+    // Parallel search
+    const found = blitz.iter(i64, &data).findAny(isLarge);
+    std.debug.print("Found large value: {?}\n", .{found});
+
+    // Parallel sort
+    var to_sort = [_]i64{ 5, 2, 8, 1, 9 };
+    blitz.sortAsc(i64, &to_sort);
+    std.debug.print("Sorted: {any}\n", .{to_sort});
+
+    // Fork-join
+    const result = blitz.join(.{
+        .a = .{ computeA, @as(u64, 10) },
+        .b = .{ computeB, @as(u64, 20) },
+    });
+    std.debug.print("Join result: a={}, b={}\n", .{ result.a, result.b });
 }
 
 fn square(x: i64) i64 { return x * x; }
-fn isPositive(x: i64) bool { return x >= 0; }
+fn isLarge(x: i64) bool { return x > 500_000_000; }
+fn computeA(n: u64) u64 { return n * n; }
+fn computeB(n: u64) u64 { return n + 100; }
 ```
 
-## Next Steps
+## Common Patterns
 
-- [Basic Concepts](03-basic-concepts.md) - Understand the execution model
-- [Iterator API](../02-usage/05-iterators.md) - Full iterator reference
+### Pattern 1: Process and Aggregate
+
+```zig
+// Process data, then aggregate results
+blitz.iterMut(f64, &data).mapInPlace(normalize);
+const total = blitz.iter(f64, &data).sum();
+```
+
+### Pattern 2: Search and Early Exit
+
+```zig
+// Find first invalid entry (stops early if found)
+const invalid = blitz.iter(Record, &records).findAny(isInvalid);
+if (invalid) |record| {
+    std.debug.print("Invalid record found: {}\n", .{record});
+}
+```
+
+### Pattern 3: Divide and Conquer
+
+```zig
+fn mergeSort(data: []i32) void {
+    if (data.len <= 1024) {
+        std.sort.insertion(i32, data, {}, std.sort.asc(i32));
+        return;
+    }
+    const mid = data.len / 2;
+    _ = blitz.join(.{
+        .left = .{ mergeSort, data[0..mid] },
+        .right = .{ mergeSort, data[mid..] },
+    });
+    merge(data, mid); // Combine sorted halves
+}
+```
+
+## Performance Tips
+
+1. **Use iterators for data processing** - SIMD-optimized aggregations
+2. **Use fork-join for recursive algorithms** - Optimal work distribution
+3. **Set appropriate thresholds** - Switch to sequential below ~1000 elements
+4. **Avoid false sharing** - Don't write to adjacent memory from different threads
+5. **Trust the defaults** - Auto grain size works well for most cases
+
+## What's Next
+
+- [Basic Concepts](03-basic-concepts.md) - Understand work stealing and fork-join
+- [Iterator API](../02-usage/05-iterators.md) - Complete iterator reference
 - [Fork-Join](../02-usage/04-fork-join.md) - Divide and conquer patterns
+- [API Reference](../03-api/01-core-api.md) - Full API documentation

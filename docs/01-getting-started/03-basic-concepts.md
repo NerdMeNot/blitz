@@ -96,7 +96,7 @@ Blitz automatically avoids parallelization for small data:
 
 ```zig
 // Uses internal threshold heuristics
-if (blitz.shouldParallelize(.sum, data.len)) {
+if (blitz.internal.shouldParallelize(.sum, data.len)) {
     // Parallel path
 } else {
     // Sequential path (less overhead)

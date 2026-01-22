@@ -198,4 +198,4 @@ if (data.len < 10_000) {
 }
 ```
 
-Use `blitz.shouldParallelize(.sum, data.len)` for automatic decision.
+Use `blitz.internal.shouldParallelize(.sum, data.len)` for automatic decision.
