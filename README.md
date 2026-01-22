@@ -284,6 +284,19 @@ For void functions:
 blitz.joinVoid(doWorkA, doWorkB, arg_a, arg_b);
 ```
 
+For error-safe execution (task B always completes even if task A fails):
+```zig
+const results = try blitz.tryJoin(
+    u64,       // Return type A
+    u64,       // Return type B
+    MyError,   // Error type
+    computeA,  // fn(ArgA) -> MyError!u64
+    computeB,  // fn(ArgB) -> MyError!u64
+    arg_a,
+    arg_b,
+);
+```
+
 ### Parallel For (parallelFor)
 
 Execute a function over range [0, n):
@@ -333,47 +346,41 @@ const sum = blitz.parallelReduce(
 ### Convenience Functions
 
 ```zig
-// Aggregations
+// Aggregations (SIMD + multi-threaded)
 const sum = blitz.parallelSum(f64, data);
-const min = blitz.parallelMin(f64, data);
-const max = blitz.parallelMax(f64, data);
-const mean = blitz.parallelMean(f64, data);
-const product = blitz.parallelProduct(f64, data);
+const min_val = blitz.parallelMin(f64, data);  // Returns ?f64
+const max_val = blitz.parallelMax(f64, data);  // Returns ?f64
 
-// Integer variants
-const sum_i = blitz.parallelSumInt(i64, int_data);
-const min_i = blitz.parallelMinInt(i64, int_data);
-const max_i = blitz.parallelMaxInt(i64, int_data);
-const mean_i = blitz.parallelMeanInt(i64, int_data);
+// Works with any numeric type
+const sum_i = blitz.parallelSum(i64, int_data);
+const min_i = blitz.parallelMin(i64, int_data);
+const max_i = blitz.parallelMax(i64, int_data);
 
-// Element-wise operations
-blitz.parallelAdd(f64, a, b, out);
+// In-place transformations
+blitz.parallelMap(f64, data, struct {
+    fn transform(x: f64) f64 { return x * 2; }
+}.transform);
+
 blitz.parallelFill(f64, data, 0.0);
-blitz.parallelFillIndexed(f64, void, data, struct {
-    fn gen(_: void, i: usize) f64 { return @floatFromInt(i); }
-}.gen, {});
 
-// Transformations
-blitz.parallelMap(f64, f64, void, input, output, struct {
-    fn transform(_: void, x: f64) f64 { return x * 2; }
-}.transform, {});
+// Predicates with early exit
+const has_negative = blitz.parallelAny(f64, data, struct {
+    fn pred(x: f64) bool { return x < 0; }
+}.pred);
 
-blitz.parallelMapInPlace(f64, void, data, struct {
-    fn transform(_: void, x: f64) f64 { return @sqrt(x); }
-}.transform, {});
+const all_positive = blitz.parallelAll(f64, data, struct {
+    fn pred(x: f64) bool { return x > 0; }
+}.pred);
 
-// Predicates
-const has_negative = blitz.parallelAny(f64, void, data, struct {
-    fn pred(_: void, x: f64) bool { return x < 0; }
-}.pred, {});
+// Find with early exit
+const found = blitz.parallelFindAny(f64, data, struct {
+    fn pred(x: f64) bool { return x > 100; }
+}.pred);
 
-const all_positive = blitz.parallelAll(f64, void, data, struct {
-    fn pred(_: void, x: f64) bool { return x > 0; }
-}.pred, {});
-
-const count_zeros = blitz.parallelCount(f64, void, data, struct {
-    fn pred(_: void, x: f64) bool { return x == 0; }
-}.pred, {});
+// For-each
+blitz.parallelForEach(f64, data, struct {
+    fn process(x: f64) void { _ = x; /* process */ }
+}.process);
 ```
 
 ### Threshold System
@@ -487,15 +494,25 @@ const total = blitz.range(0, 100).sum(i64, valueAtIndex);
 Execute multiple tasks in parallel:
 
 ```zig
-// Execute 2 tasks in parallel
-const results = blitz.join2(A, B, fnA, fnB);
+// Execute 2 tasks in parallel (different return types OK)
+const results = blitz.join2(i32, i64, fnA, fnB);
+// results[0]: i32, results[1]: i64
 
-// Execute 3 tasks in parallel
-const results = blitz.join3(A, B, C, fnA, fnB, fnC);
+// Execute 3 tasks in parallel (different return types OK)
+const results = blitz.join3(i32, i64, f64, fnA, fnB, fnC);
 
-// Execute N tasks in parallel
+// Execute N tasks in parallel (same return type required)
 const funcs = [_]fn() i64{ fn1, fn2, fn3, fn4 };
-const results = blitz.joinN(i64, 4, &funcs);
+const results = blitz.joinN(i64, 4, &funcs);  // Returns [4]i64
+
+// Spawn up to 64 tasks with scope
+blitz.scope(struct {
+    fn run(s: *blitz.Scope) void {
+        s.spawn(task1);
+        s.spawn(task2);
+        s.spawn(task3);
+    }
+}.run);  // All tasks execute in parallel when scope exits
 
 // Parallel for over index range
 blitz.parallelForRange(0, 1000, processIndex);

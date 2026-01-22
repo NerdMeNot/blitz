@@ -82,12 +82,20 @@ pub const defaultGrainSize = api.defaultGrainSize;
 pub const join = api.join;
 pub const joinVoid = api.joinVoid;
 
+// Error-safe join variants (task B always completes even if task A fails)
+pub const tryJoin = api.tryJoin;
+pub const tryJoinVoid = api.tryJoinVoid;
+
 pub const parallelFor = api.parallelFor;
 pub const parallelForWithGrain = api.parallelForWithGrain;
 
 pub const parallelReduce = api.parallelReduce;
 pub const parallelReduceWithGrain = api.parallelReduceWithGrain;
 pub const parallelReduceChunked = api.parallelReduceChunked;
+
+// Error-safe parallel iteration variants
+pub const tryForEach = api.tryForEach;
+pub const tryReduce = api.tryReduce;
 
 // New Polars-parity functions
 pub const parallelCollect = api.parallelCollect;
@@ -157,14 +165,60 @@ pub const simd_mod = @import("simd/mod.zig");
 pub const simdSum = simd_mod.sum;
 pub const simdMin = simd_mod.min;
 pub const simdMax = simd_mod.max;
-pub const parallelSumSimd = simd_mod.parallelSum;
-pub const parallelMinSimd = simd_mod.parallelMin;
-pub const parallelMaxSimd = simd_mod.parallelMax;
 
 // SIMD parallel threshold (dynamic calculation based on worker count and operation cost)
 pub const calculateParallelThreshold = simd_mod.calculateParallelThreshold;
 pub const shouldParallelizeSimd = simd_mod.shouldParallelizeSimd;
 pub const getParallelThreshold = simd_mod.getParallelThreshold;
+
+// ============================================================================
+// Convenience Functions (Rayon-style simple API)
+// ============================================================================
+
+/// Parallel sum of all elements. Uses SIMD + multi-threading.
+pub fn parallelSum(comptime T: type, data: []const T) T {
+    return simd_mod.parallelSum(T, data);
+}
+
+/// Parallel minimum. Returns null for empty slices.
+pub fn parallelMin(comptime T: type, data: []const T) ?T {
+    return simd_mod.parallelMin(T, data);
+}
+
+/// Parallel maximum. Returns null for empty slices.
+pub fn parallelMax(comptime T: type, data: []const T) ?T {
+    return simd_mod.parallelMax(T, data);
+}
+
+/// Check if any element satisfies the predicate (parallel with early exit).
+pub fn parallelAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
+    return iter_mod.iter(T, data).any(pred);
+}
+
+/// Check if all elements satisfy the predicate (parallel with early exit).
+pub fn parallelAll(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
+    return iter_mod.iter(T, data).all(pred);
+}
+
+/// Find any element satisfying the predicate (non-deterministic).
+pub fn parallelFindAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T {
+    return iter_mod.iter(T, data).findAny(pred);
+}
+
+/// Execute a function for each element in parallel.
+pub fn parallelForEach(comptime T: type, data: []const T, comptime func: fn (T) void) void {
+    iter_mod.iter(T, data).forEach(func);
+}
+
+/// Transform each element in-place in parallel.
+pub fn parallelMap(comptime T: type, data: []T, comptime func: fn (T) T) void {
+    iter_mod.iterMut(T, data).mapInPlace(func);
+}
+
+/// Fill a slice with a value in parallel.
+pub fn parallelFill(comptime T: type, data: []T, value: T) void {
+    iter_mod.iterMut(T, data).fill(value);
+}
 
 // Adaptive splitting (Phase 2)
 pub const splitter_mod = @import("internal/splitter.zig");
