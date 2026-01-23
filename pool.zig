@@ -18,14 +18,11 @@ const XorShift64Star = @import("internal/rng.zig").XorShift64Star;
 /// Progressive sleep constants - balanced for latency and CPU efficiency.
 ///
 /// Tuning history:
-/// - Original (64/256): Excessive CPU with bursty workloads (spin 64, yield 192)
-/// - Too aggressive (4/8): Hurt latency 8-11x due to slow wake-up
-/// - Current (32/64): Balanced compromise
+/// - Original (64/256): Good for continuous workloads
+/// - Current (32/64): Balanced for both continuous and bursty workloads
 ///
-/// Current values provide:
-/// - Near-baseline latency for continuous parallel workloads (+5%)
-/// - Reduced context switches (-7%) for bursty workloads
-/// - Combined with Rayon-style smart wake in pushAndWake()
+/// Combined with smart wake (wakeOneIfNeeded) which avoids waking workers
+/// when idle workers already exist to find work via polling.
 const SPIN_LIMIT: u32 = 32;
 const YIELD_LIMIT: u32 = 64;
 
@@ -210,7 +207,7 @@ pub const ThreadPool = struct {
             push_backoff +|= 1;
         }
 
-        // Wake a sleeping worker if any (lock-free!)
+        // Wake a sleeping worker if any - external calls need immediate response
         self.wakeOne();
 
         // Wait for completion
@@ -223,12 +220,25 @@ pub const ThreadPool = struct {
         return self.num_workers;
     }
 
-    /// Wake one sleeping worker (if any) to steal work.
-    /// This is completely lock-free - just atomic increment + futex wake.
+    /// Wake one sleeping worker only if needed.
+    /// Checks for idle workers first - they will find work naturally via polling.
+    /// This reduces unnecessary wakes for bursty workloads.
+    pub inline fn wakeOneIfNeeded(self: *ThreadPool) void {
+        const num_sleepers = self.sleeping_count.load(.monotonic);
+        if (num_sleepers == 0) return;
+
+        const num_idle = self.idle_count.load(.monotonic);
+        if (num_idle > 0) return; // Idle workers will find the work
+
+        // No idle workers polling - must wake a sleeper
+        _ = self.wake_futex.fetchAdd(1, .release);
+        std.Thread.Futex.wake(&self.wake_futex, 1);
+    }
+
+    /// Wake one sleeping worker unconditionally (if any are sleeping).
+    /// Use wakeOneIfNeeded() for most cases - this is for shutdown etc.
     pub inline fn wakeOne(self: *ThreadPool) void {
-        // Quick check - only wake if workers are actually sleeping
         if (self.sleeping_count.load(.monotonic) > 0) {
-            // Increment futex value to signal change, then wake one waiter
             _ = self.wake_futex.fetchAdd(1, .release);
             std.Thread.Futex.wake(&self.wake_futex, 1);
         }

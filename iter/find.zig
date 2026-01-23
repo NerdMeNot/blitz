@@ -35,8 +35,17 @@ pub fn findAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T
         return null;
     }
 
-    // Parallel scan with atomic early exit + result storage
+    // Quick sequential check at start to handle early-exit cases efficiently
+    // This avoids parallel overhead when the target is near the beginning
+    const quick_check_len = @min(data.len, 4096);
+    for (data[0..quick_check_len]) |item| {
+        if (pred(item)) return item;
+    }
+    if (quick_check_len == data.len) return null;
+
+    // Parallel scan of remaining data (after quick check)
     // Uses lock-free pattern: only CAS winner writes to result
+    const remaining = data[quick_check_len..];
     var found = std.atomic.Value(bool).init(false);
     var result: T = undefined;
 
@@ -47,8 +56,8 @@ pub fn findAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T
     };
 
     // Use parallelForWithEarlyExit to prune subtrees when found
-    api.parallelForWithEarlyExit(data.len, Context, .{
-        .slice = data,
+    api.parallelForWithEarlyExit(remaining.len, Context, .{
+        .slice = remaining,
         .found = &found,
         .result = &result,
     }, struct {
@@ -92,7 +101,16 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
         return null;
     }
 
-    // Parallel scan: track best (lowest) position found
+    // Quick sequential check at start to handle early-exit cases efficiently
+    // Since we're finding the FIRST match, if we find it early, we're done
+    const quick_check_len = @min(data.len, 4096);
+    for (data[0..quick_check_len], 0..) |item, i| {
+        if (pred(item)) return FindResult(T){ .index = i, .value = item };
+    }
+    if (quick_check_len == data.len) return null;
+
+    // Parallel scan of remaining data: track best (lowest) position found
+    const remaining = data[quick_check_len..];
     var best_pos = std.atomic.Value(usize).init(std.math.maxInt(usize));
     var best_value: T = undefined;
     var value_lock: std.Thread.Mutex = .{};
@@ -104,31 +122,37 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
 
     const Context = struct {
         slice: []const T,
+        offset: usize, // Offset to add to get original index
         best_pos: *std.atomic.Value(usize),
         best_value: *T,
         value_lock: *std.Thread.Mutex,
     };
 
-    api.parallelForWithEarlyExit(data.len, Context, .{
-        .slice = data,
+    api.parallelForWithEarlyExit(remaining.len, Context, .{
+        .slice = remaining,
+        .offset = quick_check_len,
         .best_pos = &best_pos,
         .best_value = &best_value,
         .value_lock = &value_lock,
     }, struct {
         fn body(ctx: Context, start: usize, end: usize) void {
+            // Calculate actual indices in original array
+            const actual_start = start + ctx.offset;
+            const actual_end = end + ctx.offset;
+
             // Early exit: our entire range is after best match
-            if (start >= ctx.best_pos.load(.monotonic)) return;
+            if (actual_start >= ctx.best_pos.load(.monotonic)) return;
 
-            for (start..end) |i| {
+            for (start..end, actual_start..actual_end) |local_i, actual_i| {
                 // Early exit within loop - check frequently
-                if (i >= ctx.best_pos.load(.monotonic)) return;
+                if (actual_i >= ctx.best_pos.load(.monotonic)) return;
 
-                if (pred(ctx.slice[i])) {
+                if (pred(ctx.slice[local_i])) {
                     // Try to update best position using CAS (with backoff)
                     var expected = ctx.best_pos.load(.monotonic);
                     var backoff: u32 = 0;
-                    while (i < expected) {
-                        if (ctx.best_pos.cmpxchgWeak(expected, i, .release, .monotonic)) |old| {
+                    while (actual_i < expected) {
+                        if (ctx.best_pos.cmpxchgWeak(expected, actual_i, .release, .monotonic)) |old| {
                             expected = old;
                             // Exponential backoff on CAS failure
                             const spins = @as(u32, 1) << @intCast(@min(backoff, 6));
@@ -139,7 +163,7 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
                         } else {
                             // Success - update value
                             ctx.value_lock.lock();
-                            ctx.best_value.* = ctx.slice[i];
+                            ctx.best_value.* = ctx.slice[local_i];
                             ctx.value_lock.unlock();
                             break;
                         }

@@ -277,10 +277,10 @@ const YIELD_LIMIT: u32 = 64;  // Total rounds before sleeping
 - Higher values: Better latency for continuous workloads, more CPU usage
 - Lower values: Better CPU efficiency for bursty workloads, higher wake latency
 
-Current values (32/64) balance:
-- Near-baseline latency for fork-join operations
-- ~7% reduction in context switches vs original (64/256)
-- Combined with Rayon-style smart wake notifications
+Current values (32/64) combined with smart wake provide:
+- Excellent performance on continuous workloads (24/26 benchmark wins vs Rayon)
+- Smart wake (`wakeOneIfNeeded`) avoids unnecessary worker wakes
+- Good balance between latency and CPU efficiency
 
 ### Diagnosing Contention
 

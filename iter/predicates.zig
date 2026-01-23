@@ -25,7 +25,16 @@ pub fn any(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
         return false;
     }
 
-    // Parallel scan with early exit via atomic flag
+    // Quick sequential check at start to handle early-exit cases efficiently
+    // This avoids parallel overhead when the target is near the beginning
+    const quick_check_len = @min(data.len, 4096);
+    for (data[0..quick_check_len]) |item| {
+        if (pred(item)) return true;
+    }
+    if (quick_check_len == data.len) return false;
+
+    // Parallel scan of remaining data with early exit via atomic flag
+    const remaining = data[quick_check_len..];
     var found = std.atomic.Value(bool).init(false);
 
     const Context = struct {
@@ -34,8 +43,8 @@ pub fn any(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
     };
 
     // Use parallelForWithEarlyExit - subtrees are pruned when found becomes true
-    api.parallelForWithEarlyExit(data.len, Context, .{
-        .slice = data,
+    api.parallelForWithEarlyExit(remaining.len, Context, .{
+        .slice = remaining,
         .found = &found,
     }, struct {
         fn body(ctx: Context, start: usize, end: usize) void {

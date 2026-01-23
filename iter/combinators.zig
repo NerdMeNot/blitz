@@ -36,13 +36,27 @@ pub fn ChainIter(comptime T: type) type {
         pub fn forEach(self: Self, comptime func: fn (T) void) void {
             if (self.first.len == 0 and self.second.len == 0) return;
 
-            // Process both slices - use parallelFor for each
-            if (self.first.len > 0) {
-                processSlice(T, self.first, func);
-            }
-            if (self.second.len > 0) {
+            if (self.first.len == 0) {
                 processSlice(T, self.second, func);
+                return;
             }
+
+            if (self.second.len == 0) {
+                processSlice(T, self.first, func);
+                return;
+            }
+
+            // Fork-join: process both slices in parallel
+            const processHelper = struct {
+                fn process(slice: []const T) void {
+                    processSlice(T, slice, func);
+                }
+            }.process;
+
+            _ = api.join(.{
+                .left = .{ processHelper, self.first },
+                .right = .{ processHelper, self.second },
+            });
         }
 
         /// Reduce all elements using a combining function.
@@ -57,10 +71,19 @@ pub fn ChainIter(comptime T: type) type {
                 return reduceSlice(T, self.first, identity, reducer);
             }
 
-            // Reduce both slices and combine
-            const first_result = reduceSlice(T, self.first, identity, reducer);
-            const second_result = reduceSlice(T, self.second, identity, reducer);
-            return reducer(first_result, second_result);
+            // Fork-join: reduce both slices in parallel
+            const reduceHelper = struct {
+                fn do(slice: []const T, ident: T) T {
+                    return reduceSlice(T, slice, ident, reducer);
+                }
+            }.do;
+
+            const results = api.join(.{
+                .left = .{ reduceHelper, self.first, identity },
+                .right = .{ reduceHelper, self.second, identity },
+            });
+
+            return reducer(results.left, results.right);
         }
 
         /// Sum all elements.
