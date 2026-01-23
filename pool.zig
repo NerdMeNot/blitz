@@ -15,16 +15,15 @@ const Worker = @import("worker.zig").Worker;
 const Task = @import("worker.zig").Task;
 const XorShift64Star = @import("internal/rng.zig").XorShift64Star;
 
-/// Progressive sleep constants - balanced for latency and CPU efficiency.
+/// Progressive sleep constants - optimized for low context switches.
 ///
-/// Tuning history:
-/// - Original (64/256): Good for continuous workloads
-/// - Current (32/64): Balanced for both continuous and bursty workloads
+/// Key insight: std.Thread.yield() causes context switches!
+/// Strategy: Long spin phase (no ctx switches), short yield phase.
 ///
 /// Combined with smart wake (wakeOneIfNeeded) which avoids waking workers
 /// when idle workers already exist to find work via polling.
-const SPIN_LIMIT: u32 = 32;
-const YIELD_LIMIT: u32 = 64;
+const SPIN_LIMIT: u32 = 56; // More spinning (no ctx switch)
+const YIELD_LIMIT: u32 = 64; // Only 8 yields (fewer ctx switches)
 
 /// Configuration for the thread pool.
 pub const ThreadPoolConfig = struct {
@@ -68,8 +67,16 @@ const TaggedPtr = packed struct {
     }
 };
 
+/// Cache line size for preventing false sharing.
+const CACHE_LINE = std.atomic.cache_line;
+
 /// Thread pool with Rayon-style work stealing.
+///
+/// CRITICAL: Hot atomics are cache-line aligned to prevent false sharing.
+/// Without this, workers updating idle_count invalidate cache lines for
+/// workers reading sleeping_count, causing massive contention.
 pub const ThreadPool = struct {
+    // === Cold data (rarely modified after init) ===
     allocator: std.mem.Allocator,
 
     /// Background workers (fixed array for efficient random access).
@@ -81,26 +88,28 @@ pub const ThreadPool = struct {
     /// Background worker threads.
     threads: std.ArrayListUnmanaged(std.Thread) = .{},
 
-    /// Futex for lock-free sleep/wake. Workers wait on this when idle.
-    /// Incremented by wakeOne/wakeAll to wake sleeping workers.
-    wake_futex: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-
     /// Semaphore: workers signal when they're ready.
     workers_ready: std.Thread.Semaphore = .{},
 
+    // === Hot atomics - each on its own cache line ===
+
+    /// Futex for lock-free sleep/wake. Workers wait on this when idle.
+    /// Incremented by wakeOne/wakeAll to wake sleeping workers.
+    wake_futex: std.atomic.Value(u32) align(CACHE_LINE) = std.atomic.Value(u32).init(0),
+
     /// Atomic stop flag for shutdown.
-    stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    stopping: std.atomic.Value(bool) align(CACHE_LINE) = std.atomic.Value(bool).init(false),
 
     /// Number of workers that are awake but idle (actively polling for work).
     /// These workers will find new work naturally without needing a wake.
-    idle_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    idle_count: std.atomic.Value(u32) align(CACHE_LINE) = std.atomic.Value(u32).init(0),
 
     /// Number of workers that are sleeping (blocked on futex).
     /// These workers need an explicit wake to find new work.
-    sleeping_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    sleeping_count: std.atomic.Value(u32) align(CACHE_LINE) = std.atomic.Value(u32).init(0),
 
     /// Head of injected jobs stack (lock-free Treiber stack).
-    injected_jobs: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    injected_jobs: std.atomic.Value(u64) align(CACHE_LINE) = std.atomic.Value(u64).init(0),
 
     /// Create an empty thread pool (for testing).
     pub fn initEmpty(allocator: std.mem.Allocator) ThreadPool {
