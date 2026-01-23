@@ -84,12 +84,18 @@ pub const Worker = struct {
         }
     }
 
-    /// Push a job and wake a sleeping worker.
-    /// Use this when you know idle workers should steal this work.
+    /// Push a job and notify the pool (Rayon-style smart wake).
+    ///
+    /// Only wakes sleeping workers when needed:
+    /// - If idle workers exist, they'll find the work naturally
+    /// - Only wake if work is piling up or no idle workers
+    ///
+    /// This reduces unnecessary wakes for bursty workloads.
     pub inline fn pushAndWake(self: *Worker, job: *Job) void {
         if (self.deque) |*d| {
+            const was_empty = d.isEmpty();
             d.push(job);
-            self.pool.wakeOne();
+            self.pool.notifyNewJobs(1, was_empty);
         }
     }
 

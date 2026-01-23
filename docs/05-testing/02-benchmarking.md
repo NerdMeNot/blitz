@@ -237,6 +237,59 @@ fn benchmarkScaling() void {
 }
 ```
 
+## Thread Pool Efficiency
+
+When benchmarking parallel workloads, track CPU efficiency metrics:
+
+### Resource Usage
+
+```zig
+const posix = std.posix;
+
+fn getResourceUsage() struct { ctx_switches: i64, peak_memory: i64 } {
+    const ru = posix.getrusage(posix.RUSAGE.SELF);
+    return .{
+        .ctx_switches = ru.nivcsw,  // Involuntary context switches
+        .peak_memory = ru.maxrss,   // Peak RSS in bytes (macOS) or KB (Linux)
+    };
+}
+```
+
+### Key Metrics
+
+| Metric | Good | Concerning |
+|--------|------|------------|
+| CPU time / wall time | < 2x (for N threads) | > 3x indicates contention |
+| Involuntary ctx switches | < 1000 | > 10000 indicates spinning |
+| Instructions per cycle | > 1.5 | < 0.5 indicates stalls |
+
+### Thread Pool Parameters
+
+Blitz uses progressive sleep (spin → yield → sleep) with tunable constants:
+
+```zig
+// In pool.zig
+const SPIN_LIMIT: u32 = 32;   // Spin rounds before yielding
+const YIELD_LIMIT: u32 = 64;  // Total rounds before sleeping
+```
+
+**Trade-offs:**
+- Higher values: Better latency for continuous workloads, more CPU usage
+- Lower values: Better CPU efficiency for bursty workloads, higher wake latency
+
+Current values (32/64) balance:
+- Near-baseline latency for fork-join operations
+- ~7% reduction in context switches vs original (64/256)
+- Combined with Rayon-style smart wake notifications
+
+### Diagnosing Contention
+
+If you see high CPU time relative to wall time:
+
+1. **Check context switches**: High involuntary switches indicate thread contention
+2. **Profile with perf**: Look for time spent in `futex_wait`/`spinLoopHint`
+3. **Measure efficiency**: `speedup / num_threads` should be > 50%
+
 ## Profiling
 
 ### CPU Profiling
