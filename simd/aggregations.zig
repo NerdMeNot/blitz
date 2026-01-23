@@ -87,7 +87,7 @@ pub fn min(comptime T: type, data: []const T) ?T {
     }
 
     const Vec = @Vector(VECTOR_WIDTH, T);
-    const max_val: T = std.math.maxInt(T);
+    const max_val: T = if (@typeInfo(T) == .float) std.math.inf(T) else std.math.maxInt(T);
 
     var acc0: Vec = @splat(max_val);
     var acc1: Vec = @splat(max_val);
@@ -144,7 +144,7 @@ pub fn max(comptime T: type, data: []const T) ?T {
     }
 
     const Vec = @Vector(VECTOR_WIDTH, T);
-    const min_val: T = std.math.minInt(T);
+    const min_val: T = if (@typeInfo(T) == .float) -std.math.inf(T) else std.math.minInt(T);
 
     var acc0: Vec = @splat(min_val);
     var acc1: Vec = @splat(min_val);

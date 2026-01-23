@@ -92,3 +92,85 @@ test "simd allLessThan" {
     try std.testing.expect(mod.allLessThan(i64, &data, 6));
     try std.testing.expect(!mod.allLessThan(i64, &data, 5));
 }
+
+// ============================================================================
+// Float tests
+// ============================================================================
+
+test "simd sum f64" {
+    const data = [_]f64{ 1.5, 2.5, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0 };
+    const result = mod.sum(f64, &data);
+    try std.testing.expectApproxEqAbs(@as(f64, 56.0), result, 0.0001);
+}
+
+test "simd sum f64 large" {
+    var data: [1000]f64 = undefined;
+    for (&data, 0..) |*v, i| {
+        v.* = @floatFromInt(i + 1);
+    }
+    const result = mod.sum(f64, &data);
+    try std.testing.expectApproxEqAbs(@as(f64, 500500.0), result, 0.0001);
+}
+
+test "simd min f64" {
+    const data = [_]f64{ 5.5, 2.2, 8.8, 1.1, 9.9, 3.3, 7.7, 4.4, 6.6 };
+    const result = mod.min(f64, &data);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.1), result.?, 0.0001);
+}
+
+test "simd min f64 large" {
+    var data: [1000]f64 = undefined;
+    for (&data, 0..) |*v, i| {
+        v.* = @floatFromInt(i + 100);
+    }
+    data[500] = -42.5;
+    const result = mod.min(f64, &data);
+    try std.testing.expectApproxEqAbs(@as(f64, -42.5), result.?, 0.0001);
+}
+
+test "simd max f64" {
+    const data = [_]f64{ 5.5, 2.2, 8.8, 1.1, 9.9, 3.3, 7.7, 4.4, 6.6 };
+    const result = mod.max(f64, &data);
+    try std.testing.expectApproxEqAbs(@as(f64, 9.9), result.?, 0.0001);
+}
+
+test "simd max f64 large" {
+    var data: [1000]f64 = undefined;
+    for (&data, 0..) |*v, i| {
+        v.* = @floatFromInt(i);
+    }
+    data[500] = 99999.5;
+    const result = mod.max(f64, &data);
+    try std.testing.expectApproxEqAbs(@as(f64, 99999.5), result.?, 0.0001);
+}
+
+test "simd empty f64" {
+    const empty: []const f64 = &.{};
+    try std.testing.expectApproxEqAbs(@as(f64, 0), mod.sum(f64, empty), 0.0001);
+    try std.testing.expectEqual(@as(?f64, null), mod.min(f64, empty));
+    try std.testing.expectEqual(@as(?f64, null), mod.max(f64, empty));
+}
+
+test "simd argmin f64" {
+    const data = [_]f64{ 5.5, 2.2, 8.8, 1.1, 9.9, 3.3, 7.7, 4.4, 6.6 };
+    const result = mod.argmin(f64, &data);
+    try std.testing.expect(result != null);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.1), result.?.value, 0.0001);
+    try std.testing.expectEqual(@as(usize, 3), result.?.index);
+}
+
+test "simd argmax f64" {
+    const data = [_]f64{ 5.5, 2.2, 8.8, 1.1, 9.9, 3.3, 7.7, 4.4, 6.6 };
+    const result = mod.argmax(f64, &data);
+    try std.testing.expect(result != null);
+    try std.testing.expectApproxEqAbs(@as(f64, 9.9), result.?.value, 0.0001);
+    try std.testing.expectEqual(@as(usize, 4), result.?.index);
+}
+
+test "simd f32 min max" {
+    const data = [_]f32{ 5.5, 2.2, 8.8, 1.1, 9.9, 3.3, 7.7, 4.4, 6.6 };
+    const min_result = mod.min(f32, &data);
+    const max_result = mod.max(f32, &data);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), min_result.?, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 9.9), max_result.?, 0.0001);
+}

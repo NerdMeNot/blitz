@@ -100,15 +100,18 @@ pub fn parallelMax(comptime T: type, data: []const T) ?T {
     const Context = struct { slice: []const T };
     const ctx = Context{ .slice = data };
 
+    const min_val: T = if (@typeInfo(T) == .float) -std.math.inf(T) else std.math.minInt(T);
+
     const result = api.parallelReduceChunked(
         T,
         data.len,
-        std.math.minInt(T),
+        min_val,
         Context,
         ctx,
         struct {
             fn mapChunk(c: Context, start: usize, end: usize) T {
-                return aggregations.max(T, c.slice[start..end]) orelse std.math.minInt(T);
+                const chunk_min: T = if (@typeInfo(T) == .float) -std.math.inf(T) else std.math.minInt(T);
+                return aggregations.max(T, c.slice[start..end]) orelse chunk_min;
             }
         }.mapChunk,
         struct {
@@ -119,7 +122,7 @@ pub fn parallelMax(comptime T: type, data: []const T) ?T {
         8192,
     );
 
-    return if (result == std.math.minInt(T)) null else result;
+    return if (result == min_val) null else result;
 }
 
 /// Parallel SIMD min - divides work across threads, each using SIMD.
@@ -133,15 +136,18 @@ pub fn parallelMin(comptime T: type, data: []const T) ?T {
     const Context = struct { slice: []const T };
     const ctx = Context{ .slice = data };
 
+    const max_val: T = if (@typeInfo(T) == .float) std.math.inf(T) else std.math.maxInt(T);
+
     const result = api.parallelReduceChunked(
         T,
         data.len,
-        std.math.maxInt(T),
+        max_val,
         Context,
         ctx,
         struct {
             fn mapChunk(c: Context, start: usize, end: usize) T {
-                return aggregations.min(T, c.slice[start..end]) orelse std.math.maxInt(T);
+                const chunk_max: T = if (@typeInfo(T) == .float) std.math.inf(T) else std.math.maxInt(T);
+                return aggregations.min(T, c.slice[start..end]) orelse chunk_max;
             }
         }.mapChunk,
         struct {
@@ -152,7 +158,7 @@ pub fn parallelMin(comptime T: type, data: []const T) ?T {
         8192,
     );
 
-    return if (result == std.math.maxInt(T)) null else result;
+    return if (result == max_val) null else result;
 }
 
 // ============================================================================
