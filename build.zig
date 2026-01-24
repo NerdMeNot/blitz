@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     // Unit Tests
     // ========================================================================
     const test_mod = b.createModule(.{
-        .root_source_file = b.path("mod.zig"),
+        .root_source_file = b.path("blitz.zig"),
         .target = target,
         .optimize = optimize,
     });

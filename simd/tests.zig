@@ -1,7 +1,7 @@
 //! Tests for SIMD operations.
 
 const std = @import("std");
-const mod = @import("mod.zig");
+const mod = @import("simd.zig");
 
 test "simd sum" {
     const data = [_]i64{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };

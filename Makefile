@@ -24,15 +24,15 @@ build-debug:
 
 ## Run all unit tests
 test:
-	zig test mod.zig -lc
+	zig test blitz.zig -lc
 
 ## Run tests with verbose output (shows all test names)
 test-verbose:
-	zig test mod.zig -lc 2>&1 | cat
+	zig test blitz.zig -lc 2>&1 | cat
 
 ## Run tests in release mode
 test-release:
-	zig test mod.zig -lc -OReleaseFast
+	zig test blitz.zig -lc -OReleaseFast
 
 ## Run tests quietly (via build system, only show failures)
 test-quiet:

@@ -55,7 +55,7 @@ jobs:
           version: ${{ needs.validate.outputs.zig_version }}
 
       - name: Run tests
-        run: zig test mod.zig -lc
+        run: zig test blitz.zig -lc
 
       - name: Build
         run: zig build

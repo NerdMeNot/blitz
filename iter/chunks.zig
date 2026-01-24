@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const api = @import("../api.zig");
+const simd = @import("../simd/simd.zig");
 
 /// Parallel iterator over fixed-size chunks of a slice.
 pub fn ChunksIter(comptime T: type) type {
@@ -99,6 +100,12 @@ pub fn ChunksIter(comptime T: type) type {
                 }.mapFn,
                 combine_fn,
             );
+        }
+
+        /// Sum all elements using SIMD-optimized parallel reduction.
+        /// This is more efficient than reduce() with a manual sum function.
+        pub fn sum(self: Self) T {
+            return simd.parallelSum(T, self.data);
         }
     };
 }

@@ -7,7 +7,7 @@
 
 Blitz brings the ergonomics of Rust's Rayon library to Zig, with a focus on:
 - **Zero-allocation fork-join**: Stack-allocated futures, no heap overhead
-- **Lock-free work stealing**: Chase-Lev deques with futex-based wake
+- **Lock-free work stealing**: Chase-Lev deques with Rayon-style JEC protocol
 - **Composable iterators**: Chain, zip, flatten with automatic parallelism
 - **SIMD acceleration**: Vectorized aggregations where applicable
 
@@ -44,22 +44,53 @@ const sum = blitz.iter(i64, data).sum();
 Add to your `build.zig.zon`:
 
 ```zig
-.dependencies = .{
-    .blitz = .{
-        .url = "https://github.com/NerdMeNot/blitz/archive/refs/tags/v1.0.0-zig0.15.2.tar.gz",
-        .hash = "...", // zig build will provide this
+.{
+    .name = .my_project,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+
+    .dependencies = .{
+        .blitz = .{
+            .url = "https://github.com/NerdMeNot/blitz/archive/refs/tags/v1.0.0-zig0.15.2.tar.gz",
+            .hash = "blitz-1.0.0-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            // Run `zig build` to get the correct hash
+        },
     },
-},
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
 ```
 
 Add to your `build.zig`:
 
 ```zig
-const blitz_dep = b.dependency("blitz", .{
-    .target = target,
-    .optimize = optimize,
-});
-exe.root_module.addImport("blitz", blitz_dep.module("blitz"));
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    // Get blitz dependency
+    const blitz_dep = b.dependency("blitz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Create your executable
+    const exe = b.addExecutable(.{
+        .name = "my_app",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Add blitz module
+    exe.root_module.addImport("blitz", blitz_dep.module("blitz"));
+
+    b.installArtifact(exe);
+}
 ```
 
 ### Building from Source
@@ -528,23 +559,23 @@ Benchmarks on 10-core Apple M1 Pro, comparing Blitz to Rust's Rayon:
 └─────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
-│                      SCHEDULER (pool.zig, worker.zig)            │
-│  • Rayon-style idle/sleeping state tracking                      │
-│  • Smart wake: only wake sleepers when needed                    │
-│  • Progressive sleep: spin → yield → futex wait                  │
+│                      SCHEDULER (pool.zig)                        │
+│  • Rayon-style JEC (Jobs Event Counter) protocol                 │
+│  • AtomicCounters: packed u64 sleeping/inactive/JEC              │
+│  • Progressive sleep: 32 yields → announce sleepy → sleep        │
 └─────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
 │                      LOCK-FREE PRIMITIVES                        │
 │  • Chase-Lev deque: wait-free push/pop, lock-free steal          │
-│  • 4-state OnceLatch: prevents missed wakes                      │
+│  • 4-state CoreLatch: prevents missed wakes during sleep         │
 │  • Cache-line aligned to prevent false sharing                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
 
-1. **Lock-free wake via futex**: No mutex on the hot path. Wake overhead is ~5-10ns vs ~100-300ns with condition variables.
+1. **Rayon-style JEC protocol**: Workers track sleep state via Jobs Event Counter. Prevents missed wakes without hot-path overhead.
 
 2. **Stack-allocated futures**: Jobs are embedded in the caller's stack frame. Zero heap allocation for fork-join operations.
 

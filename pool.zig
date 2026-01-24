@@ -1,142 +1,595 @@
-//! ThreadPool for Blitz - Rayon-style Work Stealing
+//! Pool - Lock-Free Work-Stealing Thread Pool
 //!
-//! A thread pool with lock-free work stealing following Rayon's proven design:
-//!
-//! - Each worker has a Chase-Lev deque (push/pop bottom, steal top)
-//! - Idle workers steal from random victims (randomized to avoid thundering herd)
-//! - External threads inject work via lock-free Treiber stack
-//! - Progressive sleep: spin → yield → sleep to balance latency and CPU usage
-//!
-//! No heartbeat thread - work visibility is instant through the deques.
+//! Implements a complete work-stealing architecture:
+//! - Chase-Lev lock-free deques per worker
+//! - AtomicCounters with packed sleeping/inactive/JEC counters
+//! - Progressive sleep: 32 rounds yield -> announce sleepy -> 1 more yield -> sleep
+//! - CoreLatch 4-state protocol for robust wake guarantees
 
 const std = @import("std");
-const Job = @import("job.zig").Job;
-const Worker = @import("worker.zig").Worker;
-const Task = @import("worker.zig").Task;
+const Deque = @import("deque.zig").Deque;
 const XorShift64Star = @import("internal/rng.zig").XorShift64Star;
+const OnceLatch = @import("latch.zig").OnceLatch;
+const SpinWait = @import("latch.zig").SpinWait;
 
-/// Progressive sleep constants - optimized for low context switches.
-///
-/// Key insight: std.Thread.yield() causes context switches!
-/// Strategy: Long spin phase (no ctx switches), short yield phase.
-///
-/// Combined with smart wake (wakeOneIfNeeded) which avoids waking workers
-/// when idle workers already exist to find work via polling.
-const SPIN_LIMIT: u32 = 56; // More spinning (no ctx switch)
-const YIELD_LIMIT: u32 = 64; // Only 8 yields (fewer ctx switches)
+// ============================================================================
+// Job and Task
+// ============================================================================
 
-/// Configuration for the thread pool.
+pub const Job = struct {
+    handler: ?*const fn (*Task, *Job) void = null,
+
+    pub inline fn init() Job {
+        return .{};
+    }
+};
+
+pub const Task = struct {
+    worker: *Worker,
+
+    pub inline fn call(self: *Task, comptime T: type, func: anytype, arg: anytype) T {
+        return @call(.always_inline, func, .{ self, arg });
+    }
+};
+
+// ============================================================================
+// Thread Pool Configuration
+// ============================================================================
+
 pub const ThreadPoolConfig = struct {
-    /// Number of background workers. null = auto-detect (CPU count - 1).
     background_worker_count: ?usize = null,
 };
 
-/// An injected job from an external thread.
-/// External threads block until a worker executes the job.
-pub const InjectedJob = struct {
-    /// Handler to execute the job.
-    handler: *const fn (*InjectedJob, *Worker) void,
-    /// Completion signal.
-    done: std.Thread.ResetEvent = .{},
-    /// Next pointer for Treiber stack.
-    next: ?*InjectedJob = null,
+// ============================================================================
+// Fence Emulation (Zig 0.15 lacks @fence builtin)
+// ============================================================================
+
+/// Global sentinel for SeqCst fence emulation.
+/// A fetchAdd(0) with SeqCst ordering acts as a full memory barrier.
+var fence_sentinel: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+
+inline fn seqCstFence() void {
+    _ = fence_sentinel.fetchAdd(0, .seq_cst);
+}
+
+// ============================================================================
+// AtomicCounters - Packed u64 with sleeping/inactive/JEC
+// ============================================================================
+
+const SLEEPING_SHIFT: u6 = 0;
+const INACTIVE_SHIFT: u6 = 16;
+const JEC_SHIFT: u6 = 32;
+
+const ONE_SLEEPING: u64 = 1;
+const ONE_INACTIVE: u64 = 1 << INACTIVE_SHIFT;
+const ONE_JEC: u64 = 1 << JEC_SHIFT;
+
+const AtomicCounters = struct {
+    value: std.atomic.Value(u64),
+
+    fn init() AtomicCounters {
+        return .{ .value = std.atomic.Value(u64).init(0) };
+    }
+
+    /// Load with acquire ordering (sufficient for reads).
+    inline fn load(self: *const AtomicCounters) u64 {
+        return self.value.load(.acquire);
+    }
+
+    /// Load with SeqCst (only when needed for JEC protocol).
+    inline fn loadSeqCst(self: *const AtomicCounters) u64 {
+        return self.value.load(.seq_cst);
+    }
+
+    /// Extract sleeping count from packed value.
+    inline fn extractSleeping(counters: u64) u16 {
+        return @truncate(counters);
+    }
+
+    /// Extract inactive count from packed value.
+    inline fn extractInactive(counters: u64) u16 {
+        return @truncate(counters >> INACTIVE_SHIFT);
+    }
+
+    /// Extract JEC from packed value.
+    inline fn extractJec(counters: u64) u32 {
+        return @truncate(counters >> JEC_SHIFT);
+    }
+
+    /// SeqCst for all counter operations ensures the sleep protocol
+    /// works correctly (tickle-then-get-sleepy race prevention).
+    fn tryAddSleepingThread(self: *AtomicCounters, expected: u64) bool {
+        const new = expected +% ONE_SLEEPING;
+        return self.value.cmpxchgWeak(expected, new, .seq_cst, .monotonic) == null;
+    }
+
+    fn subSleepingThread(self: *AtomicCounters) void {
+        _ = self.value.fetchSub(ONE_SLEEPING, .seq_cst);
+    }
+
+    fn addInactiveThread(self: *AtomicCounters) void {
+        _ = self.value.fetchAdd(ONE_INACTIVE, .seq_cst);
+    }
+
+    fn subInactiveThread(self: *AtomicCounters) u16 {
+        const old = self.value.fetchSub(ONE_INACTIVE, .seq_cst);
+        const sleeping = extractSleeping(old);
+        return @min(sleeping, 2); // Heuristic: wake at most 2
+    }
+
+    /// Increment JEC if currently sleepy (even). Returns old counters.
+    /// SeqCst for the CAS ensures visibility across threads.
+    fn incrementJecIfSleepy(self: *AtomicCounters) u64 {
+        while (true) {
+            const old = self.loadSeqCst();
+            const jec_val = extractJec(old);
+
+            if ((jec_val & 1) != 0) {
+                return old; // Already active (odd)
+            }
+
+            // Try to increment JEC (toggle to odd)
+            const new = old +% ONE_JEC;
+            if (self.value.cmpxchgWeak(old, new, .seq_cst, .monotonic) == null) {
+                return old;
+            }
+            // Retry on CAS failure
+        }
+    }
 };
 
-/// Tagged pointer for ABA prevention in lock-free stack.
-const TaggedPtr = packed struct {
-    ptr: u48,
-    tag: u16,
+// ============================================================================
+// Sleep Manager
+// ============================================================================
 
-    fn init(p: ?*InjectedJob, t: u16) TaggedPtr {
+const ROUNDS_UNTIL_SLEEPY: u32 = 32;
+const ROUNDS_UNTIL_SLEEPING: u32 = 33;
+
+/// Per-idle-session state.
+const IdleState = struct {
+    worker_index: usize,
+    rounds: u32,
+    jobs_counter: u32, // JEC snapshot when sleepy announced
+};
+
+/// Per-worker sleep state (condvar-based blocking).
+/// Cache-line aligned to prevent false sharing between workers.
+const WorkerSleepState = struct {
+    mutex: std.Thread.Mutex,
+    condvar: std.Thread.Condition,
+    is_blocked: bool,
+    // Padding to ensure each WorkerSleepState is on its own cache line
+    _padding: [std.atomic.cache_line - (@sizeOf(std.Thread.Mutex) + @sizeOf(std.Thread.Condition) + 1) % std.atomic.cache_line]u8 = undefined,
+
+    fn init() WorkerSleepState {
         return .{
-            .ptr = if (p) |pp| @truncate(@intFromPtr(pp)) else 0,
-            .tag = t,
+            .mutex = .{},
+            .condvar = .{},
+            .is_blocked = false,
+            ._padding = undefined,
         };
     }
+};
 
-    fn getPtr(self: TaggedPtr) ?*InjectedJob {
-        return if (self.ptr == 0) null else @ptrFromInt(@as(usize, self.ptr));
+/// CoreLatch for worker sleep/wake (4-state protocol).
+/// This is separate from OnceLatch - used for idle workers.
+const CoreLatch = struct {
+    state: std.atomic.Value(u32),
+
+    const UNSET: u32 = 0;
+    const SLEEPY: u32 = 1;
+    const SLEEPING: u32 = 2;
+    const SET: u32 = 3;
+
+    fn init() CoreLatch {
+        return .{ .state = std.atomic.Value(u32).init(UNSET) };
     }
 
-    fn toU64(self: TaggedPtr) u64 {
-        return @bitCast(self);
+    fn reset(self: *CoreLatch) void {
+        self.state.store(UNSET, .release);
     }
 
-    fn fromU64(v: u64) TaggedPtr {
-        return @bitCast(v);
+    /// Check if latch is set (fast path).
+    fn probe(self: *const CoreLatch) bool {
+        return self.state.load(.acquire) == SET;
+    }
+
+    /// Try to transition UNSET -> SLEEPY. Returns true if successful.
+    fn getSleepy(self: *CoreLatch) bool {
+        return self.state.cmpxchgWeak(UNSET, SLEEPY, .seq_cst, .monotonic) == null;
+    }
+
+    /// Try to transition SLEEPY -> SLEEPING. Returns true if successful.
+    fn fallAsleep(self: *CoreLatch) bool {
+        return self.state.cmpxchgWeak(SLEEPY, SLEEPING, .seq_cst, .monotonic) == null;
+    }
+
+    /// Wake up from SLEEPING state (if not already SET).
+    /// Check probe() first to avoid unnecessary CAS.
+    fn wakeUp(self: *CoreLatch) void {
+        if (!self.probe()) {
+            _ = self.state.cmpxchgWeak(SLEEPING, UNSET, .seq_cst, .monotonic);
+        }
+    }
+
+    /// Set the latch. Returns true if thread was SLEEPING (needs wake).
+    fn set(self: *CoreLatch) bool {
+        return self.state.swap(SET, .acq_rel) == SLEEPING;
     }
 };
 
-/// Cache line size for preventing false sharing.
-const CACHE_LINE = std.atomic.cache_line;
-
-/// Thread pool with Rayon-style work stealing.
-///
-/// CRITICAL: Hot atomics are cache-line aligned to prevent false sharing.
-/// Without this, workers updating idle_count invalidate cache lines for
-/// workers reading sleeping_count, causing massive contention.
-pub const ThreadPool = struct {
-    // === Cold data (rarely modified after init) ===
+/// Sleep manager - handles progressive sleep for idle workers.
+pub const Sleep = struct {
+    counters: AtomicCounters,
+    worker_sleep_states: []WorkerSleepState,
     allocator: std.mem.Allocator,
 
-    /// Background workers (fixed array for efficient random access).
-    workers: []?*Worker = &[_]?*Worker{},
-
-    /// Number of workers.
-    num_workers: usize = 0,
-
-    /// Background worker threads.
-    threads: std.ArrayListUnmanaged(std.Thread) = .{},
-
-    /// Semaphore: workers signal when they're ready.
-    workers_ready: std.Thread.Semaphore = .{},
-
-    // === Hot atomics - each on its own cache line ===
-
-    /// Futex for lock-free sleep/wake. Workers wait on this when idle.
-    /// Incremented by wakeOne/wakeAll to wake sleeping workers.
-    wake_futex: std.atomic.Value(u32) align(CACHE_LINE) = std.atomic.Value(u32).init(0),
-
-    /// Atomic stop flag for shutdown.
-    stopping: std.atomic.Value(bool) align(CACHE_LINE) = std.atomic.Value(bool).init(false),
-
-    /// Number of workers that are awake but idle (actively polling for work).
-    /// These workers will find new work naturally without needing a wake.
-    idle_count: std.atomic.Value(u32) align(CACHE_LINE) = std.atomic.Value(u32).init(0),
-
-    /// Number of workers that are sleeping (blocked on futex).
-    /// These workers need an explicit wake to find new work.
-    sleeping_count: std.atomic.Value(u32) align(CACHE_LINE) = std.atomic.Value(u32).init(0),
-
-    /// Head of injected jobs stack (lock-free Treiber stack).
-    injected_jobs: std.atomic.Value(u64) align(CACHE_LINE) = std.atomic.Value(u64).init(0),
-
-    /// Create an empty thread pool (for testing).
-    pub fn initEmpty(allocator: std.mem.Allocator) ThreadPool {
-        return ThreadPool{ .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, num_workers: usize) Sleep {
+        if (num_workers == 0) {
+            return .{
+                .counters = AtomicCounters.init(),
+                .worker_sleep_states = &.{},
+                .allocator = allocator,
+            };
+        }
+        const states = allocator.alloc(WorkerSleepState, num_workers) catch @panic("OOM");
+        for (states) |*s| s.* = WorkerSleepState.init();
+        return .{
+            .counters = AtomicCounters.init(),
+            .worker_sleep_states = states,
+            .allocator = allocator,
+        };
     }
 
-    /// Initialize the thread pool.
-    pub fn init(allocator: std.mem.Allocator) ThreadPool {
-        return ThreadPool{ .allocator = allocator };
+    pub fn deinit(self: *Sleep) void {
+        if (self.worker_sleep_states.len > 0) {
+            self.allocator.free(self.worker_sleep_states);
+            self.worker_sleep_states = &.{};
+        }
     }
 
-    /// Start the thread pool with the given configuration.
-    pub fn start(self: *ThreadPool, config: ThreadPoolConfig) void {
-        const count = config.background_worker_count orelse blk: {
-            const cpus = std.Thread.getCpuCount() catch 1;
-            break :blk if (cpus > 1) cpus - 1 else 1;
+    /// Called when worker starts looking for work.
+    pub fn startLooking(self: *Sleep, worker_index: usize) IdleState {
+        self.counters.addInactiveThread();
+        return .{
+            .worker_index = worker_index,
+            .rounds = 0,
+            .jobs_counter = 0,
+        };
+    }
+
+    /// Called when worker finds work.
+    pub fn workFound(self: *Sleep) u16 {
+        return self.counters.subInactiveThread(); // Returns threads to wake
+    }
+
+    /// Called when no work found during idle search.
+    /// Uses spin-then-yield progression to reduce syscall overhead and variance.
+    /// Returns true if work might be available (caller should check immediately).
+    pub fn noWorkFound(
+        self: *Sleep,
+        idle: *IdleState,
+        latch: *CoreLatch,
+        pool: *ThreadPool,
+    ) void {
+        idle.rounds += 1;
+
+        if (idle.rounds < ROUNDS_UNTIL_SLEEPY) {
+            // Yield on every round like Rayon does.
+            // This gives the OS scheduler a chance to run other threads
+            // and prevents the variance seen with pure spin loops.
+            std.Thread.yield() catch {};
+            return;
+        }
+
+        if (idle.rounds == ROUNDS_UNTIL_SLEEPY) {
+            // Announce sleepy: increment JEC if even, save snapshot
+            const old = self.counters.incrementJecIfSleepy();
+            idle.jobs_counter = AtomicCounters.extractJec(old);
+            std.Thread.yield() catch {};
+            return;
+        }
+
+        if (idle.rounds == ROUNDS_UNTIL_SLEEPING) {
+            // One more yield before sleeping
+            std.Thread.yield() catch {};
+            return;
+        }
+
+        // Actually sleep
+        self.sleep(idle, latch, pool);
+    }
+
+    fn sleep(
+        self: *Sleep,
+        idle: *IdleState,
+        latch: *CoreLatch,
+        pool: *ThreadPool,
+    ) void {
+        // Step 1: Try to transition latch UNSET -> SLEEPY
+        if (!latch.getSleepy()) {
+            idle.rounds = 0; // Latch was set, wake fully
+            return;
+        }
+
+        const state = &self.worker_sleep_states[idle.worker_index];
+        state.mutex.lock();
+
+        // Step 2: Try to transition latch SLEEPY -> SLEEPING
+        if (!latch.fallAsleep()) {
+            state.mutex.unlock();
+            idle.rounds = 0; // Latch was set during transition
+            return;
+        }
+
+        // Step 3: Try to add ourselves to sleeping count
+        while (true) {
+            const counters = self.counters.loadSeqCst();
+            const jec_now = AtomicCounters.extractJec(counters);
+
+            // Check if JEC changed since we announced sleepy
+            if (jec_now != idle.jobs_counter) {
+                // New work arrived! Go back to sleepy state
+                state.mutex.unlock();
+                latch.wakeUp();
+                idle.rounds = ROUNDS_UNTIL_SLEEPY; // Wake partly
+                return;
+            }
+
+            if (self.counters.tryAddSleepingThread(counters)) {
+                break; // Successfully registered as sleeping
+            }
+        }
+
+        // Step 4: CRITICAL - SeqCst fence then check injected jobs
+        seqCstFence();
+
+        if (pool.hasInjectedJobs()) {
+            // Work was injected while we were registering
+            self.counters.subSleepingThread();
+            state.mutex.unlock();
+            latch.wakeUp();
+            idle.rounds = 0;
+            return;
+        }
+
+        // Step 5: Actually block on condvar
+        state.is_blocked = true;
+        while (state.is_blocked and !pool.stopping.load(.acquire)) {
+            state.condvar.wait(&state.mutex);
+        }
+        state.mutex.unlock();
+
+        // Woken up
+        latch.wakeUp();
+        idle.rounds = 0;
+    }
+
+    /// Called when new jobs are injected from external thread.
+    pub fn newInjectedJobs(self: *Sleep, num_jobs: u32, queue_was_empty: bool) void {
+        // CRITICAL: SeqCst fence before reading counters
+        seqCstFence();
+        self.newJobs(num_jobs, queue_was_empty);
+    }
+
+    /// Called when new jobs are pushed from worker thread.
+    pub fn newInternalJobs(self: *Sleep, num_jobs: u32, queue_was_empty: bool) void {
+        // No fence needed for internal jobs - deque has acquire/release semantics
+        self.newJobs(num_jobs, queue_was_empty);
+    }
+
+    fn newJobs(self: *Sleep, num_jobs: u32, queue_was_empty: bool) void {
+        // Toggle JEC to odd if even
+        const old = self.counters.incrementJecIfSleepy();
+        const sleeping = AtomicCounters.extractSleeping(old);
+
+        if (sleeping == 0) return; // Nobody to wake
+
+        const inactive = AtomicCounters.extractInactive(old);
+        const awake_but_idle = inactive -| sleeping;
+
+        // Decide how many to wake
+        const num_to_wake: u32 = if (queue_was_empty) blk: {
+            // Queue was empty - wake if not enough idle workers
+            if (awake_but_idle < num_jobs) {
+                break :blk @min(num_jobs - awake_but_idle, sleeping);
+            }
+            break :blk 0;
+        } else blk: {
+            // Queue not empty - always wake some
+            break :blk @min(num_jobs, sleeping);
         };
 
-        self.num_workers = count;
-        self.threads.ensureUnusedCapacity(self.allocator, count) catch @panic("OOM");
-        self.workers = self.allocator.alloc(?*Worker, count) catch @panic("OOM");
-        @memset(self.workers, null);
+        self.wakeThreads(num_to_wake);
+    }
 
-        // Spawn background workers
+    pub fn wakeThreads(self: *Sleep, count: u32) void {
+        var woken: u32 = 0;
+        for (self.worker_sleep_states, 0..) |*state, i| {
+            if (woken >= count) break;
+            if (self.wakeSpecificThread(i, state)) {
+                woken += 1;
+            }
+        }
+    }
+
+    fn wakeSpecificThread(self: *Sleep, index: usize, state: *WorkerSleepState) bool {
+        _ = index;
+        state.mutex.lock();
+        defer state.mutex.unlock();
+
+        if (state.is_blocked) {
+            state.is_blocked = false;
+            state.condvar.signal();
+            // CRITICAL: Waker decrements counter, not sleeper
+            self.counters.subSleepingThread();
+            return true;
+        }
+        return false;
+    }
+
+    pub fn wakeAll(self: *Sleep) void {
+        for (self.worker_sleep_states, 0..) |*state, i| {
+            _ = self.wakeSpecificThread(i, state);
+        }
+    }
+};
+
+// ============================================================================
+// Worker
+// ============================================================================
+
+/// Default deque capacity (must be power of 2).
+const DEFAULT_DEQUE_CAPACITY: usize = 256;
+
+/// Worker statistics for debugging/monitoring.
+pub const WorkerStats = struct {
+    jobs_executed: u64 = 0,
+    jobs_stolen: u64 = 0,
+};
+
+pub const Worker = struct {
+    pool: *ThreadPool,
+    id: u32 = 0,
+    deque: ?Deque(*Job) = null,
+    rng: XorShift64Star = XorShift64Star.init(0),
+    latch: CoreLatch = CoreLatch.init(),
+    stats: WorkerStats = .{},
+
+    pub fn initDeque(self: *Worker, allocator: std.mem.Allocator, worker_id: u32) !void {
+        self.id = worker_id;
+        self.deque = try Deque(*Job).init(allocator, DEFAULT_DEQUE_CAPACITY);
+        self.rng = XorShift64Star.initFromIndex(worker_id);
+        self.latch = CoreLatch.init();
+    }
+
+    pub fn deinitDeque(self: *Worker) void {
+        if (self.deque) |*d| {
+            d.deinit();
+            self.deque = null;
+        }
+    }
+
+    pub inline fn begin(self: *Worker) Task {
+        return Task{ .worker = self };
+    }
+
+    pub inline fn push(self: *Worker, job: *Job) void {
+        if (self.deque) |*d| {
+            d.push(job);
+        }
+    }
+
+    pub inline fn pushAndWake(self: *Worker, job: *Job) void {
+        if (self.deque) |*d| {
+            const was_empty = d.isEmpty();
+            d.push(job);
+            self.pool.sleep.newInternalJobs(1, was_empty);
+        }
+    }
+
+    pub inline fn pop(self: *Worker) ?*Job {
+        if (self.deque) |*d| {
+            return d.pop();
+        }
+        return null;
+    }
+
+    pub inline fn steal(self: *Worker) ?*Job {
+        if (self.deque) |*d| {
+            return d.stealLoop();
+        }
+        return null;
+    }
+
+    pub inline fn hasWork(self: *Worker) bool {
+        if (self.deque) |*d| {
+            return !d.isEmpty();
+        }
+        return false;
+    }
+
+    pub inline fn localDequeIsEmpty(self: *Worker) bool {
+        if (self.deque) |*d| {
+            return d.isEmpty();
+        }
+        return true;
+    }
+};
+
+// ============================================================================
+// Injected Job Node (for Treiber stack)
+// ============================================================================
+
+const InjectedJob = struct {
+    job: *Job,
+    next: ?*InjectedJob,
+};
+
+// ============================================================================
+// Thread Pool
+// ============================================================================
+
+pub const ThreadPool = struct {
+    allocator: std.mem.Allocator,
+    workers: []Worker,
+    num_workers: usize,
+    threads: std.ArrayListUnmanaged(std.Thread),
+    sleep: Sleep,
+    stopping: std.atomic.Value(bool),
+    workers_ready: std.Thread.Semaphore,
+    main_worker: Worker,
+
+    // Treiber stack for injected jobs (lock-free)
+    injected_jobs_head: std.atomic.Value(?*InjectedJob),
+
+    pub fn init(allocator: std.mem.Allocator) ThreadPool {
+        var pool = ThreadPool{
+            .allocator = allocator,
+            .workers = &.{},
+            .num_workers = 0,
+            .threads = .{},
+            .sleep = Sleep.init(allocator, 0),
+            .stopping = std.atomic.Value(bool).init(false),
+            .workers_ready = .{},
+            .main_worker = undefined,
+            .injected_jobs_head = std.atomic.Value(?*InjectedJob).init(null),
+        };
+        pool.main_worker = Worker{ .pool = &pool };
+        return pool;
+    }
+
+    /// Initialize with no workers (for testing).
+    pub fn initEmpty(allocator: std.mem.Allocator) ThreadPool {
+        return init(allocator);
+    }
+
+    pub fn start(self: *ThreadPool, config: ThreadPoolConfig) !void {
+        const count = config.background_worker_count orelse (std.Thread.getCpuCount() catch 1);
+
+        if (count == 0) {
+            self.num_workers = 0;
+            return;
+        }
+
+        // Reinitialize sleep manager with correct count
+        self.sleep.deinit();
+        self.sleep = Sleep.init(self.allocator, count);
+
+        self.num_workers = count;
+        self.workers = try self.allocator.alloc(Worker, count);
+        for (self.workers) |*w| {
+            w.* = Worker{ .pool = self };
+        }
+
+        // Initialize main worker with deque
+        self.main_worker = Worker{ .pool = self };
+        try self.main_worker.initDeque(self.allocator, 0xFFFF); // Special ID for main worker
+
+        // Spawn worker threads
         for (0..count) |i| {
-            const thread = std.Thread.spawn(.{}, workerLoop, .{ self, @as(u32, @intCast(i)) }) catch @panic("spawn error");
-            self.threads.append(self.allocator, thread) catch @panic("OOM");
+            const thread = try std.Thread.spawn(.{}, workerLoop, .{ self, @as(u32, @intCast(i)) });
+            try self.threads.append(self.allocator, thread);
         }
 
         // Wait for all workers to be ready
@@ -145,395 +598,189 @@ pub const ThreadPool = struct {
         }
     }
 
-    /// Shut down the thread pool.
     pub fn deinit(self: *ThreadPool) void {
-        // Signal stop
+        // Signal shutdown
         self.stopping.store(true, .release);
+        self.sleep.wakeAll();
 
-        // Wake all sleeping workers (lock-free!)
-        _ = self.wake_futex.fetchAdd(1, .release);
-        std.Thread.Futex.wake(&self.wake_futex, std.math.maxInt(u32));
-
-        // Join threads
+        // Wait for all threads
         for (self.threads.items) |thread| {
             thread.join();
         }
 
         // Clean up workers
-        for (self.workers) |maybe_worker| {
-            if (maybe_worker) |worker| {
-                worker.deinitDeque(self.allocator);
-                self.allocator.destroy(worker);
-            }
+        for (self.workers) |*w| {
+            w.deinitDeque();
         }
+        self.main_worker.deinitDeque();
 
-        if (self.workers.len > 0) {
-            self.allocator.free(self.workers);
-        }
+        if (self.workers.len > 0) self.allocator.free(self.workers);
         self.threads.deinit(self.allocator);
+        self.sleep.deinit();
+
+        // Clean up any remaining injected jobs
+        while (self.popInjectedJob()) |_| {}
+
         self.* = undefined;
     }
 
-    /// Execute a function on the thread pool (for external threads).
-    /// Injects the job and blocks until a worker executes it.
-    pub fn call(self: *ThreadPool, comptime T: type, func: anytype, arg: anytype) T {
-        const Arg = @TypeOf(arg);
-
-        const CallJob = struct {
-            base: InjectedJob,
-            arg: Arg,
-            result: T,
-
-            fn execute(base: *InjectedJob, worker: *Worker) void {
-                const this: *@This() = @fieldParentPtr("base", base);
-                var task = worker.begin();
-                this.result = task.call(T, func, this.arg);
-                base.done.set();
-            }
-        };
-
-        var call_job = CallJob{
-            .base = InjectedJob{ .handler = CallJob.execute },
-            .arg = arg,
-            .result = undefined,
-        };
-
-        // Push to injected jobs stack (lock-free with backoff)
-        var push_backoff: u32 = 0;
-        while (true) {
-            const head_raw = self.injected_jobs.load(.acquire);
-            const head = TaggedPtr.fromU64(head_raw);
-            call_job.base.next = head.getPtr();
-            const new_head = TaggedPtr.init(&call_job.base, head.tag +% 1);
-            if (self.injected_jobs.cmpxchgWeak(head_raw, new_head.toU64(), .release, .acquire) == null) {
-                break;
-            }
-            // Exponential backoff on CAS failure
-            const spins = @as(u32, 1) << @intCast(@min(push_backoff, 6));
-            for (0..spins) |_| {
-                std.atomic.spinLoopHint();
-            }
-            push_backoff +|= 1;
-        }
-
-        // Wake a sleeping worker only if no idle workers are polling
-        // Reduces context switches by ~20-30% for bursty workloads
-        self.wakeOneIfNeeded();
-
-        // Wait for completion
-        call_job.base.done.wait();
-        return call_job.result;
-    }
-
-    /// Get the number of workers.
     pub fn numWorkers(self: *const ThreadPool) usize {
         return self.num_workers;
     }
 
-    /// Wake one sleeping worker only if needed.
-    /// Checks for idle workers first - they will find work naturally via polling.
-    /// This reduces unnecessary wakes for bursty workloads.
-    pub inline fn wakeOneIfNeeded(self: *ThreadPool) void {
-        const num_sleepers = self.sleeping_count.load(.monotonic);
-        if (num_sleepers == 0) return;
-
-        const num_idle = self.idle_count.load(.monotonic);
-        if (num_idle > 0) return; // Idle workers will find the work
-
-        // No idle workers polling - must wake a sleeper
-        _ = self.wake_futex.fetchAdd(1, .release);
-        std.Thread.Futex.wake(&self.wake_futex, 1);
+    /// Execute a function on the pool (blocking).
+    pub fn call(self: *ThreadPool, comptime T: type, func: anytype, arg: anytype) T {
+        var task = self.main_worker.begin();
+        return @call(.always_inline, func, .{ &task, arg });
     }
 
-    /// Wake one sleeping worker unconditionally (if any are sleeping).
-    /// Use wakeOneIfNeeded() for most cases - this is for shutdown etc.
-    pub inline fn wakeOne(self: *ThreadPool) void {
-        if (self.sleeping_count.load(.monotonic) > 0) {
-            _ = self.wake_futex.fetchAdd(1, .release);
-            std.Thread.Futex.wake(&self.wake_futex, 1);
-        }
+    // ========================================================================
+    // Job Injection (for external submissions)
+    // ========================================================================
+
+    /// Check if there are injected jobs (lock-free).
+    pub fn hasInjectedJobs(self: *const ThreadPool) bool {
+        return self.injected_jobs_head.load(.acquire) != null;
     }
 
-    /// Notify the pool that new internal jobs are available (Rayon-style).
-    ///
-    /// This implements Rayon's smart wake strategy:
-    /// - If no workers are sleeping, return (awake-but-idle workers will find work)
-    /// - If queue wasn't empty OR no idle workers, wake a sleeper
-    /// - Otherwise, idle workers will find the work naturally
-    ///
-    /// This minimizes unnecessary wakes while ensuring work gets done.
-    pub inline fn notifyNewJobs(self: *ThreadPool, _: u32, queue_was_empty: bool) void {
-        const num_sleepers = self.sleeping_count.load(.monotonic);
-
-        if (num_sleepers == 0) {
-            // No sleeping workers - awake workers will find the work
-            return;
-        }
-
-        const num_awake_but_idle = self.idle_count.load(.monotonic);
-
-        // Wake if: work is piling up OR no idle workers to find new work
-        if (!queue_was_empty or num_awake_but_idle == 0) {
-            _ = self.wake_futex.fetchAdd(1, .release);
-            std.Thread.Futex.wake(&self.wake_futex, 1);
-        }
-        // Otherwise: idle workers are polling and will find the work
-    }
-
-    /// Get total jobs executed and stolen across all workers (for debugging).
-    pub fn getStats(self: *const ThreadPool) struct { executed: u64, stolen: u64 } {
-        var executed: u64 = 0;
-        var stolen: u64 = 0;
-        for (self.workers) |maybe_worker| {
-            if (maybe_worker) |w| {
-                executed += w.stats.jobs_executed;
-                stolen += w.stats.jobs_stolen;
-            }
-        }
-        return .{ .executed = executed, .stolen = stolen };
-    }
-
-    /// Reset stats for all workers.
-    pub fn resetStats(self: *ThreadPool) void {
-        for (self.workers) |maybe_worker| {
-            if (maybe_worker) |w| {
-                w.stats = .{};
-            }
-        }
-    }
-
-    /// Pop an injected job (called by workers).
-    fn popInjectedJob(self: *ThreadPool) ?*InjectedJob {
-        var backoff: u32 = 0;
+    /// Pop an injected job from the Treiber stack.
+    pub fn popInjectedJob(self: *ThreadPool) ?*Job {
         while (true) {
-            const head_raw = self.injected_jobs.load(.acquire);
-            const head = TaggedPtr.fromU64(head_raw);
-            const head_ptr = head.getPtr() orelse return null;
-            const new_head = TaggedPtr.init(head_ptr.next, head.tag +% 1);
-            if (self.injected_jobs.cmpxchgWeak(head_raw, new_head.toU64(), .release, .acquire) == null) {
-                return head_ptr;
+            const head = self.injected_jobs_head.load(.acquire) orelse return null;
+            if (self.injected_jobs_head.cmpxchgWeak(head, head.next, .acq_rel, .acquire) == null) {
+                const job = head.job;
+                self.allocator.destroy(head);
+                return job;
             }
-            // Exponential backoff on CAS failure
-            const spins = @as(u32, 1) << @intCast(@min(backoff, 6));
-            for (0..spins) |_| {
-                std.atomic.spinLoopHint();
-            }
-            backoff +|= 1;
         }
     }
+
+    /// Inject a job from an external thread (allocates InjectedJob node).
+    pub fn injectJob(self: *ThreadPool, job: *Job) !void {
+        const node = try self.allocator.create(InjectedJob);
+        node.* = .{ .job = job, .next = null };
+
+        var was_empty = false;
+        while (true) {
+            const head = self.injected_jobs_head.load(.acquire);
+            was_empty = head == null;
+            node.next = head;
+            if (self.injected_jobs_head.cmpxchgWeak(head, node, .acq_rel, .acquire) == null) {
+                break;
+            }
+        }
+
+        self.sleep.newInjectedJobs(1, was_empty);
+    }
+
+    /// Notify that new jobs are available.
+    pub inline fn notifyNewJobs(self: *ThreadPool, num_jobs: u32, queue_was_empty: bool) void {
+        self.sleep.newInternalJobs(num_jobs, queue_was_empty);
+    }
+
+    pub inline fn notifyWorkAvailable(self: *ThreadPool) void {
+        self.sleep.newInternalJobs(1, true);
+    }
+
+    // ========================================================================
+    // Work Stealing
+    // ========================================================================
+
+    /// Try to steal work from other workers (including main_worker).
+    /// Tries ALL workers to ensure work is found if available (reduces variance).
+    pub fn tryStealFromOthers(self: *ThreadPool, self_worker: *Worker) ?*Job {
+        const n = self.num_workers;
+
+        // Try to steal from main_worker first (most likely to have work from join())
+        if (self_worker != &self.main_worker) {
+            if (self.main_worker.steal()) |job| {
+                return job;
+            }
+        }
+
+        if (n == 0) return null;
+
+        // Try ALL background workers starting from random index.
+        // This ensures we find work if it exists, reducing variance.
+        const start_idx = self_worker.rng.nextBounded(n);
+
+        for (0..n) |i| {
+            const victim_idx = (start_idx + i) % n;
+            if (victim_idx == self_worker.id) continue;
+
+            if (self.workers[victim_idx].steal()) |job| {
+                return job;
+            }
+        }
+
+        return null;
+    }
+
+    /// Find work from any source.
+    /// Priority: own deque (LIFO) > steal from others (FIFO) > injected queue.
+    inline fn findWork(self: *ThreadPool, worker: *Worker) ?*Job {
+        // 1. Own deque (LIFO pop) - fastest, best cache locality
+        if (worker.pop()) |job| return job;
+
+        // 2. Steal from random victim (FIFO steal)
+        if (self.tryStealFromOthers(worker)) |job| return job;
+
+        // 3. Global injected queue
+        return self.popInjectedJob();
+    }
+
 };
 
-/// Worker idle state for Rayon-style tracking.
-const IdleState = enum {
-    /// Working or spinning - not counted in any idle counter
-    active,
-    /// Awake but idle - actively polling, counted in idle_count
-    idle,
-    /// Sleeping - blocked on futex, counted in sleeping_count
-    sleeping,
-};
-
-/// Background worker loop.
-fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
-    // Create and initialize worker
-    const worker = pool.allocator.create(Worker) catch @panic("OOM");
-    worker.* = Worker{ .pool = pool };
-    worker.initDeque(pool.allocator, worker_id) catch @panic("OOM");
-    pool.workers[worker_id] = worker;
-
-    // Signal ready
-    pool.workers_ready.post();
-
-    var rounds: u32 = 0;
-    var idle_state: IdleState = .active;
-
-    while (!pool.stopping.load(.acquire)) {
-        // 1. Try our own deque (fast path)
-        if (worker.pop()) |job| {
-            transitionToActive(pool, &idle_state);
-            executeJob(worker, job);
-            rounds = 0;
-            continue;
-        }
-
-        // 2. Try stealing from others
-        if (trySteal(pool, worker)) |job| {
-            transitionToActive(pool, &idle_state);
-            worker.stats.jobs_stolen += 1;
-            executeJob(worker, job);
-            rounds = 0;
-            continue;
-        }
-
-        // 3. Try injected jobs
-        if (pool.popInjectedJob()) |injected| {
-            transitionToActive(pool, &idle_state);
-            injected.handler(injected, worker);
-            rounds = 0;
-            continue;
-        }
-
-        // 4. Progressive sleep (Rayon-style state transitions)
-        rounds += 1;
-
-        if (rounds < SPIN_LIMIT) {
-            // Phase 1: Spin (not counted as idle)
-            std.atomic.spinLoopHint();
-        } else if (rounds < YIELD_LIMIT) {
-            // Phase 2: Yield - mark as awake-but-idle
-            transitionToIdle(pool, &idle_state);
-            std.Thread.yield() catch {};
-        } else {
-            // Phase 3: Sleep - transition to sleeping
-            transitionToSleeping(pool, &idle_state);
-
-            // Check for work one more time before sleeping
-            if (pool.popInjectedJob()) |injected| {
-                transitionToActive(pool, &idle_state);
-                injected.handler(injected, worker);
-                rounds = 0;
-                continue;
-            }
-
-            // Also check deques one more time
-            if (trySteal(pool, worker)) |job| {
-                transitionToActive(pool, &idle_state);
-                worker.stats.jobs_stolen += 1;
-                executeJob(worker, job);
-                rounds = 0;
-                continue;
-            }
-
-            // Now sleep on futex - will wake when wake_futex changes
-            const current = pool.wake_futex.load(.acquire);
-            if (!pool.stopping.load(.acquire)) {
-                std.Thread.Futex.wait(&pool.wake_futex, current);
-            }
-
-            // After waking, transition back to active (will re-enter idle if no work)
-            transitionToActive(pool, &idle_state);
-            rounds = 0;
-        }
-    }
-
-    // Clean up state on exit
-    transitionToActive(pool, &idle_state);
-}
-
-/// Transition worker to active state (decrement appropriate counter).
-fn transitionToActive(pool: *ThreadPool, state: *IdleState) void {
-    switch (state.*) {
-        .active => {},
-        .idle => {
-            _ = pool.idle_count.fetchSub(1, .monotonic);
-            state.* = .active;
-        },
-        .sleeping => {
-            _ = pool.sleeping_count.fetchSub(1, .monotonic);
-            state.* = .active;
-        },
-    }
-}
-
-/// Transition worker to idle state (awake but polling).
-fn transitionToIdle(pool: *ThreadPool, state: *IdleState) void {
-    switch (state.*) {
-        .active => {
-            _ = pool.idle_count.fetchAdd(1, .monotonic);
-            state.* = .idle;
-        },
-        .idle => {},
-        .sleeping => {
-            // Shouldn't happen, but handle it
-            _ = pool.sleeping_count.fetchSub(1, .monotonic);
-            _ = pool.idle_count.fetchAdd(1, .monotonic);
-            state.* = .idle;
-        },
-    }
-}
-
-/// Transition worker to sleeping state.
-fn transitionToSleeping(pool: *ThreadPool, state: *IdleState) void {
-    switch (state.*) {
-        .active => {
-            _ = pool.sleeping_count.fetchAdd(1, .monotonic);
-            state.* = .sleeping;
-        },
-        .idle => {
-            _ = pool.idle_count.fetchSub(1, .monotonic);
-            _ = pool.sleeping_count.fetchAdd(1, .monotonic);
-            state.* = .sleeping;
-        },
-        .sleeping => {},
-    }
-}
-
-/// Execute a job that was obtained from a deque (either pop or steal).
-///
-/// The job was obtained exclusively through Chase-Lev deque operations,
-/// so no additional claiming is needed. The job's handler is responsible
-/// for signaling the embedded latch in the containing Future.
-fn executeJob(worker: *Worker, job: *Job) void {
-    // Execute the job's handler
-    // The handler writes the result to the Future and signals the embedded latch
+/// Execute a job. Minimal overhead - no stats in hot path.
+inline fn executeJob(worker: *Worker, job: *Job) void {
     var task = worker.begin();
     if (job.handler) |handler| {
         handler(&task, job);
     }
-    worker.stats.jobs_executed += 1;
 }
 
-/// Try to steal from other workers using randomized victim selection.
-///
-/// Follows Rayon's exact steal pattern:
-/// - Single-item stealing (not batch) for simplicity and reliability
-/// - Try each victim once per round
-/// - If any victim returned Retry (contention), do another round with backoff
-/// - Stop when a job is found or all victims are Empty
-fn trySteal(pool: *ThreadPool, self_worker: *Worker) ?*Job {
-    const num_workers = pool.num_workers;
-    if (num_workers <= 1) return null;
+// ============================================================================
+// Worker Main Loop
+// ============================================================================
 
-    const start = self_worker.rng.nextBounded(num_workers);
-    var backoff: u32 = 0;
-    const BACKOFF_LIMIT: u32 = 6; // Max ~64 spins before yield
+fn workerLoop(pool: *ThreadPool, worker_id: u32) void {
+    const worker = &pool.workers[worker_id];
+    worker.initDeque(pool.allocator, worker_id) catch @panic("Failed to init worker deque");
 
-    // Rayon-style steal loop: single-item stealing with retry on contention
-    while (true) {
-        var retry = false;
+    // Signal ready
+    pool.workers_ready.post();
 
-        for (0..num_workers) |offset| {
-            const victim_idx = (start +% offset) % num_workers;
-            if (victim_idx == self_worker.id) continue;
-
-            const victim = pool.workers[victim_idx] orelse continue;
-
-            // Single-item steal (matches Rayon's approach)
-            if (victim.deque) |*deque| {
-                const result = deque.steal();
-                switch (result.result) {
-                    .success => return result.item,
-                    .empty => {},
-                    .retry => retry = true,
-                }
-            }
+    // Main loop
+    while (!pool.stopping.load(.acquire)) {
+        // Fast path: find and execute work
+        if (pool.findWork(worker)) |job| {
+            executeJob(worker, job);
+            continue;
         }
 
-        // If no retries needed, we're done (all victims were empty)
-        if (!retry) {
-            return null;
+        // Slow path: enter idle state
+        var idle_state = pool.sleep.startLooking(worker_id);
+        var found_work = false;
+
+        while (!pool.stopping.load(.acquire)) {
+            if (pool.findWork(worker)) |job| {
+                found_work = true;
+                const to_wake = pool.sleep.workFound();
+                executeJob(worker, job);
+                pool.sleep.wakeThreads(to_wake);
+                break;
+            }
+
+            pool.sleep.noWorkFound(
+                &idle_state,
+                &worker.latch,
+                pool,
+            );
         }
 
-        // Exponential backoff before retrying (reduces cache thrashing)
-        if (backoff < BACKOFF_LIMIT) {
-            const spins = @as(u32, 1) << @intCast(backoff);
-            for (0..spins) |_| {
-                std.atomic.spinLoopHint();
-            }
-            backoff += 1;
-        } else {
-            // Heavy contention - yield to OS
-            std.Thread.yield() catch {};
+        // If we exited idle loop without finding work, decrement inactive count
+        if (!found_work) {
+            _ = pool.sleep.workFound();
         }
     }
 }
@@ -542,31 +789,93 @@ fn trySteal(pool: *ThreadPool, self_worker: *Worker) ?*Job {
 // Tests
 // ============================================================================
 
-test "ThreadPool - initEmpty" {
-    var pool = ThreadPool.initEmpty(std.testing.allocator);
-    defer pool.deinit();
-    try std.testing.expect(!pool.stopping.load(.acquire));
-}
-
-test "ThreadPool - init and deinit" {
+test "Pool - init and call" {
     var pool = ThreadPool.init(std.testing.allocator);
-    pool.start(.{ .background_worker_count = 2 });
-    defer pool.deinit();
-    try std.testing.expect(pool.num_workers == 2);
-}
-
-test "ThreadPool - call" {
-    var pool = ThreadPool.init(std.testing.allocator);
-    pool.start(.{ .background_worker_count = 2 });
+    try pool.start(.{ .background_worker_count = 4 });
     defer pool.deinit();
 
-    const arg: i32 = 21;
     const result = pool.call(i32, struct {
         fn compute(task: *Task, x: i32) i32 {
             _ = task;
             return x * 2;
         }
-    }.compute, arg);
+    }.compute, @as(i32, 21));
 
     try std.testing.expectEqual(@as(i32, 42), result);
+}
+
+test "Pool - single threaded works" {
+    var pool = ThreadPool.init(std.testing.allocator);
+    try pool.start(.{ .background_worker_count = 0 });
+    defer pool.deinit();
+
+    const result = pool.call(i32, struct {
+        fn compute(task: *Task, x: i32) i32 {
+            _ = task;
+            return x + 1;
+        }
+    }.compute, @as(i32, 10));
+
+    try std.testing.expectEqual(@as(i32, 11), result);
+}
+
+test "AtomicCounters - bit packing" {
+    var counters = AtomicCounters.init();
+
+    var val = counters.load();
+    try std.testing.expectEqual(@as(u16, 0), AtomicCounters.extractSleeping(val));
+    try std.testing.expectEqual(@as(u16, 0), AtomicCounters.extractInactive(val));
+    try std.testing.expectEqual(@as(u32, 0), AtomicCounters.extractJec(val));
+
+    counters.addInactiveThread();
+    val = counters.load();
+    try std.testing.expectEqual(@as(u16, 1), AtomicCounters.extractInactive(val));
+
+    _ = counters.tryAddSleepingThread(val);
+    val = counters.load();
+    try std.testing.expectEqual(@as(u16, 1), AtomicCounters.extractSleeping(val));
+
+    _ = counters.incrementJecIfSleepy();
+    val = counters.load();
+    try std.testing.expectEqual(@as(u32, 1), AtomicCounters.extractJec(val));
+}
+
+test "CoreLatch - state transitions" {
+    var latch = CoreLatch.init();
+
+    try std.testing.expectEqual(CoreLatch.UNSET, latch.state.load(.seq_cst));
+    try std.testing.expect(!latch.probe());
+
+    // UNSET -> SLEEPY
+    try std.testing.expect(latch.getSleepy());
+    try std.testing.expectEqual(CoreLatch.SLEEPY, latch.state.load(.seq_cst));
+
+    // SLEEPY -> SLEEPING
+    try std.testing.expect(latch.fallAsleep());
+    try std.testing.expectEqual(CoreLatch.SLEEPING, latch.state.load(.seq_cst));
+
+    // SLEEPING -> UNSET via wakeUp
+    latch.wakeUp();
+    try std.testing.expectEqual(CoreLatch.UNSET, latch.state.load(.seq_cst));
+
+    // Test set()
+    _ = latch.set();
+    try std.testing.expect(latch.probe());
+}
+
+test "Sleep - basic operations" {
+    var sleep = Sleep.init(std.testing.allocator, 4);
+    defer sleep.deinit();
+
+    var val = sleep.counters.load();
+    try std.testing.expectEqual(@as(u16, 0), AtomicCounters.extractInactive(val));
+
+    const idle = sleep.startLooking(0);
+    try std.testing.expectEqual(@as(u32, 0), idle.rounds);
+    val = sleep.counters.load();
+    try std.testing.expectEqual(@as(u16, 1), AtomicCounters.extractInactive(val));
+
+    _ = sleep.workFound();
+    val = sleep.counters.load();
+    try std.testing.expectEqual(@as(u16, 0), AtomicCounters.extractInactive(val));
 }

@@ -18,7 +18,7 @@
 
 const std = @import("std");
 const api = @import("../api.zig");
-const simd = @import("../simd/mod.zig");
+const simd = @import("../simd/simd.zig");
 
 // Re-export sub-modules
 pub const find = @import("find.zig");

@@ -1,7 +1,7 @@
 //! Tests for parallel iterators.
 
 const std = @import("std");
-const mod = @import("mod.zig");
+const mod = @import("iter.zig");
 const iter = mod.iter;
 const iterMut = mod.iterMut;
 const range = mod.range;

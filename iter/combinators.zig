@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const api = @import("../api.zig");
+const simd = @import("../simd/simd.zig");
 
 // ============================================================================
 // ChainIter - Concatenate Two Slices
@@ -86,13 +87,31 @@ pub fn ChainIter(comptime T: type) type {
             return reducer(results.left, results.right);
         }
 
-        /// Sum all elements.
+        /// Sum all elements using SIMD-optimized parallel reduction.
         pub fn sum(self: Self) T {
-            return self.reduce(0, struct {
-                fn add(a: T, b: T) T {
-                    return a + b;
+            if (self.first.len == 0 and self.second.len == 0) return 0;
+
+            if (self.first.len == 0) {
+                return simd.parallelSum(T, self.second);
+            }
+
+            if (self.second.len == 0) {
+                return simd.parallelSum(T, self.first);
+            }
+
+            // Fork-join: sum both slices in parallel using SIMD
+            const sumHelper = struct {
+                fn do(slice: []const T) T {
+                    return simd.parallelSum(T, slice);
                 }
-            }.add);
+            }.do;
+
+            const results = api.join(.{
+                .left = .{ sumHelper, self.first },
+                .right = .{ sumHelper, self.second },
+            });
+
+            return results.left + results.right;
         }
 
         /// Check if any element satisfies a predicate.
@@ -243,8 +262,15 @@ pub fn ZipIter(comptime A: type, comptime B: type) type {
             );
         }
 
-        /// Compute dot product (sum of products).
+        /// Compute dot product (sum of products) using SIMD optimization.
+        /// Only works when A and B are the same type.
         pub fn dotProduct(self: Self) A {
+            // Use SIMD-optimized dot product when types match
+            if (A == B) {
+                return simd.parallelDotProduct(A, self.a, self.b);
+            }
+
+            // Fall back to mapReduce for different types
             return self.mapReduce(
                 A,
                 0,
@@ -417,13 +443,31 @@ pub fn FlattenIter(comptime T: type) type {
             );
         }
 
-        /// Sum all elements.
+        /// Sum all elements using SIMD-optimized parallel reduction.
         pub fn sum(self: Self) T {
-            return self.reduce(0, struct {
-                fn add(a: T, b: T) T {
-                    return a + b;
-                }
-            }.add);
+            if (self.slices.len == 0) return 0;
+
+            const Context = struct { slices: []const []const T };
+            const ctx = Context{ .slices = self.slices };
+
+            return api.parallelReduce(
+                T,
+                self.slices.len,
+                0,
+                Context,
+                ctx,
+                struct {
+                    fn mapFn(c: Context, i: usize) T {
+                        // Use SIMD sum for each sub-slice
+                        return simd.sum(T, c.slices[i]);
+                    }
+                }.mapFn,
+                struct {
+                    fn add(a: T, b: T) T {
+                        return a + b;
+                    }
+                }.add,
+            );
         }
 
         /// Collect all elements into a flat array.

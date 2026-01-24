@@ -110,62 +110,45 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
     if (quick_check_len == data.len) return null;
 
     // Parallel scan of remaining data: track best (lowest) position found
+    // Lock-free: we only need to track the best position atomically.
+    // The value can be retrieved from the slice once we know the position.
     const remaining = data[quick_check_len..];
     var best_pos = std.atomic.Value(usize).init(std.math.maxInt(usize));
-    var best_value: T = undefined;
-    var value_lock: std.Thread.Mutex = .{};
-    // For findFirst, we can't use a simple early_exit flag because threads
-    // processing EARLIER ranges must continue even after a match is found.
-    // But we CAN use a dummy flag for the early exit check and rely on
-    // position-based pruning in the body.
     var dummy_exit = std.atomic.Value(bool).init(false);
 
     const Context = struct {
         slice: []const T,
         offset: usize, // Offset to add to get original index
         best_pos: *std.atomic.Value(usize),
-        best_value: *T,
-        value_lock: *std.Thread.Mutex,
     };
 
     api.parallelForWithEarlyExit(remaining.len, Context, .{
         .slice = remaining,
         .offset = quick_check_len,
         .best_pos = &best_pos,
-        .best_value = &best_value,
-        .value_lock = &value_lock,
     }, struct {
         fn body(ctx: Context, start: usize, end: usize) void {
             // Calculate actual indices in original array
             const actual_start = start + ctx.offset;
-            const actual_end = end + ctx.offset;
 
             // Early exit: our entire range is after best match
-            if (actual_start >= ctx.best_pos.load(.monotonic)) return;
+            const current_best = ctx.best_pos.load(.monotonic);
+            if (actual_start >= current_best) return;
 
-            for (start..end, actual_start..actual_end) |local_i, actual_i| {
-                // Early exit within loop - check frequently
+            for (start..end) |local_i| {
+                const actual_i = local_i + ctx.offset;
+
+                // Early exit: we're past the best known position
                 if (actual_i >= ctx.best_pos.load(.monotonic)) return;
 
                 if (pred(ctx.slice[local_i])) {
-                    // Try to update best position using CAS (with backoff)
+                    // Lock-free update: try to set best_pos if we're better
                     var expected = ctx.best_pos.load(.monotonic);
-                    var backoff: u32 = 0;
                     while (actual_i < expected) {
                         if (ctx.best_pos.cmpxchgWeak(expected, actual_i, .release, .monotonic)) |old| {
                             expected = old;
-                            // Exponential backoff on CAS failure
-                            const spins = @as(u32, 1) << @intCast(@min(backoff, 6));
-                            for (0..spins) |_| {
-                                std.atomic.spinLoopHint();
-                            }
-                            backoff +|= 1;
                         } else {
-                            // Success - update value
-                            ctx.value_lock.lock();
-                            ctx.best_value.* = ctx.slice[local_i];
-                            ctx.value_lock.unlock();
-                            break;
+                            break; // Success
                         }
                     }
                     return; // Found in our range, done
@@ -175,7 +158,7 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
     }.body, &dummy_exit);
 
     const pos = best_pos.load(.acquire);
-    return if (pos == std.math.maxInt(usize)) null else FindResult(T){ .index = pos, .value = best_value };
+    return if (pos == std.math.maxInt(usize)) null else FindResult(T){ .index = pos, .value = data[pos] };
 }
 
 /// Find the last (rightmost) element satisfying a predicate (deterministic).
@@ -199,26 +182,22 @@ pub fn findLast(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?
     }
 
     // Parallel scan: track best (highest) position found
+    // Lock-free: we only track position atomically, retrieve value at end
+    // Use 0 as sentinel since valid positions are 0..len-1, but we also track has_match
     var best_pos = std.atomic.Value(usize).init(0);
     var has_match = std.atomic.Value(bool).init(false);
-    var best_value: T = undefined;
-    var value_lock: std.Thread.Mutex = .{};
     var dummy_exit = std.atomic.Value(bool).init(false);
 
     const Context = struct {
         slice: []const T,
         best_pos: *std.atomic.Value(usize),
         has_match: *std.atomic.Value(bool),
-        best_value: *T,
-        value_lock: *std.Thread.Mutex,
     };
 
     api.parallelForWithEarlyExit(data.len, Context, .{
         .slice = data,
         .best_pos = &best_pos,
         .has_match = &has_match,
-        .best_value = &best_value,
-        .value_lock = &value_lock,
     }, struct {
         fn body(ctx: Context, start: usize, end: usize) void {
             // Early exit: our entire range is before best match
@@ -232,16 +211,15 @@ pub fn findLast(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?
                 if (ctx.has_match.load(.monotonic) and i <= ctx.best_pos.load(.monotonic)) return;
 
                 if (pred(ctx.slice[i])) {
-                    // Try to update best position
-                    ctx.value_lock.lock();
-                    defer ctx.value_lock.unlock();
-
-                    const current_best = ctx.best_pos.load(.monotonic);
-                    const has = ctx.has_match.load(.monotonic);
-                    if (!has or i > current_best) {
-                        ctx.best_pos.store(i, .release);
-                        ctx.has_match.store(true, .release);
-                        ctx.best_value.* = ctx.slice[i];
+                    // Lock-free update: CAS loop to set best_pos if we're better (higher)
+                    ctx.has_match.store(true, .release);
+                    var expected = ctx.best_pos.load(.monotonic);
+                    while (i > expected) {
+                        if (ctx.best_pos.cmpxchgWeak(expected, i, .release, .monotonic)) |old| {
+                            expected = old;
+                        } else {
+                            break; // Success
+                        }
                     }
                     return; // Found in our range, done
                 }
@@ -250,7 +228,7 @@ pub fn findLast(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?
     }.body, &dummy_exit);
 
     return if (has_match.load(.acquire))
-        FindResult(T){ .index = best_pos.load(.acquire), .value = best_value }
+        FindResult(T){ .index = best_pos.load(.acquire), .value = data[best_pos.load(.acquire)] }
     else
         null;
 }

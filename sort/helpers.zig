@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const simd_check = @import("simd_check.zig");
+const runtime = @import("../ops/runtime.zig");
 
 // ============================================================================
 // Configuration Constants
@@ -15,8 +16,32 @@ pub const BLOCK: usize = 128;
 /// Maximum elements for insertion sort
 pub const MAX_INSERTION: usize = 20;
 
-/// Maximum elements before parallel execution kicks in
+/// Base threshold before parallel execution kicks in (for 1-2 workers)
+pub const BASE_SEQUENTIAL: usize = 2000;
+
+/// Maximum elements before parallel execution kicks in.
+/// Scales with worker count: more workers = higher threshold to justify overhead.
+/// This is a legacy constant for compatibility - prefer getSequentialThreshold().
 pub const MAX_SEQUENTIAL: usize = 2000;
+
+/// Get the adaptive sequential threshold based on worker count.
+///
+/// With more workers, fork-join overhead increases (more coordination),
+/// but work per worker decreases. We need larger chunks to justify the overhead.
+///
+/// Formula: base * max(1, workers / 2)
+/// - 1-2 workers: 2000 elements
+/// - 4 workers: 4000 elements
+/// - 8 workers: 8000 elements
+/// - 16 workers: 16000 elements
+pub fn getSequentialThreshold() usize {
+    if (!runtime.isInitialized()) {
+        return BASE_SEQUENTIAL;
+    }
+    const workers = runtime.numWorkers();
+    const scale = @max(1, workers / 2);
+    return BASE_SEQUENTIAL * scale;
+}
 
 /// Minimum length for median-of-medians pivot selection
 pub const SHORTEST_MEDIAN_OF_MEDIANS: usize = 50;

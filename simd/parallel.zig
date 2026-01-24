@@ -402,3 +402,40 @@ pub fn parallelArgmaxByKey(
     }
     return null;
 }
+
+// ============================================================================
+// Parallel Dot Product
+// ============================================================================
+
+/// Parallel SIMD dot product - divides work across threads, each using SIMD.
+pub fn parallelDotProduct(comptime T: type, a: []const T, b: []const T) T {
+    const n = @min(a.len, b.len);
+    if (n == 0) return 0;
+
+    // For small/medium data, just use SIMD (no parallelism overhead)
+    if (!shouldParallelizeSimd(.sum, n)) {
+        return aggregations.dotProduct(T, a, b);
+    }
+
+    const Context = struct { a: []const T, b: []const T };
+    const ctx = Context{ .a = a, .b = b };
+
+    return api.parallelReduceChunked(
+        T,
+        n,
+        0,
+        Context,
+        ctx,
+        struct {
+            fn mapChunk(c: Context, start: usize, end: usize) T {
+                return aggregations.dotProduct(T, c.a[start..end], c.b[start..end]);
+            }
+        }.mapChunk,
+        struct {
+            fn combine(x: T, y: T) T {
+                return x + y;
+            }
+        }.combine,
+        8192,
+    );
+}

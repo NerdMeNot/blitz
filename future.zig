@@ -1,10 +1,10 @@
-//! Future for Blitz - Rayon-style Fork-Join
+//! Future for Blitz - Fork-Join Parallelism
 //!
 //! Future(Input, Output) enables fork-join parallelism with return values.
 //! The future is stack-allocated and uses comptime specialization to
 //! eliminate vtable overhead.
 //!
-//! Design (following Rayon's StackJob):
+//! Design:
 //! - Future owns a Job that gets pushed to the deque
 //! - Future embeds a latch for completion signaling (no allocation!)
 //! - Fork: push job to deque, job is instantly visible to thieves
@@ -22,9 +22,10 @@
 //! ```
 
 const std = @import("std");
-const Job = @import("job.zig").Job;
-const Task = @import("worker.zig").Task;
-const Worker = @import("worker.zig").Worker;
+const pool_mod = @import("pool.zig");
+const Job = pool_mod.Job;
+const Task = pool_mod.Task;
+const Worker = pool_mod.Worker;
 const OnceLatch = @import("latch.zig").OnceLatch;
 
 /// A future represents a computation that may run on another thread.
@@ -66,6 +67,9 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
         ///
         /// The job is pushed to the worker's deque and becomes
         /// instantly visible to idle workers for stealing.
+        ///
+        /// Always notifies the sleep manager when pushing work,
+        /// allowing idle workers to wake and steal.
         pub inline fn fork(
             self: *Self,
             task: *Task,
@@ -82,10 +86,10 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
                     // CRITICAL: Set thread-local task context for nested calls.
                     // Without this, nested blitz.join() would take the slow path
                     // (pool.call) instead of the fast path, causing deadlock.
-                    const api = @import("api.zig");
-                    const prev_task = api.current_task;
-                    api.current_task = t;
-                    defer api.current_task = prev_task;
+                    const runtime = @import("ops/runtime.zig");
+                    const prev_task = runtime.current_task;
+                    runtime.current_task = t;
+                    defer runtime.current_task = prev_task;
 
                     // Execute the function and store result in the Future
                     // (The Future lives on the owner's stack, valid until join() returns)
@@ -104,49 +108,8 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
             // Reset latch for this fork (may be reused)
             self.latch = OnceLatch.init();
 
-            // Push to deque and wake an idle worker to steal this job
+            // Push to deque AND notify sleep manager
             task.worker.pushAndWake(&self.job);
-        }
-
-        /// Schedule work with Rayon-style smart wake.
-        ///
-        /// This implements Rayon's wake strategy:
-        /// - Check if deque was empty before push
-        /// - Only wake sleeping workers if needed
-        /// - Awake-but-idle workers will find work naturally
-        pub inline fn forkSmartWake(
-            self: *Self,
-            task: *Task,
-            comptime func: fn (*Task, Input) Output,
-            input: Input,
-        ) void {
-            const Handler = struct {
-                fn handle(t: *Task, job: *Job) void {
-                    const fut: *Self = @fieldParentPtr("job", job);
-
-                    const api = @import("api.zig");
-                    const prev_task = api.current_task;
-                    api.current_task = t;
-                    defer api.current_task = prev_task;
-
-                    fut.result = @call(.always_inline, func, .{ t, fut.input });
-                    fut.latch.setDone();
-                }
-            };
-
-            self.input = input;
-            self.job = Job.init();
-            self.job.handler = Handler.handle;
-            self.latch = OnceLatch.init();
-
-            // Check if queue was empty before push (Rayon does this)
-            const queue_was_empty = task.worker.deque != null and task.worker.deque.?.isEmpty();
-
-            // Push to deque
-            task.worker.push(&self.job);
-
-            // Notify pool with Rayon-style logic
-            task.worker.pool.notifyNewJobs(1, queue_was_empty);
         }
 
         /// Wait for the result of fork().
@@ -154,43 +117,50 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
         /// Returns the computed value if the job was stolen and executed,
         /// or null if the job was not stolen (caller should execute locally).
         ///
-        /// Hybrid approach for best performance at all depths:
-        /// - Quick latch check first (catches fast stolen completions - good at shallow depth)
-        /// - Then try pop (catches local jobs - good at deep depth)
-        /// - Only enter steal loop when both fail
+        /// Fast path optimized: try pop first without latch check.
+        /// At deep depths, job is almost always local, so we avoid atomic latch probe.
         pub inline fn join(self: *Self, task: *Task) ?Output {
             const worker = task.worker;
 
-            // Fast path: job was stolen and already completed (common at shallow depth)
-            if (self.latch.probe()) {
-                return self.result;
-            }
-
-            // Try to pop our job (common at deep depth - job is usually local)
-            if (worker.pop()) |popped_job| {
-                if (popped_job == &self.job) {
-                    return null; // Execute locally
-                }
-                // Got a different job - execute it
-                if (popped_job.handler) |handler| {
-                    handler(task, popped_job);
-                }
-            }
-
-            // Work-stealing loop for when job was stolen but not yet complete
-            var spin_backoff: u32 = 0;
-            const SPIN_LIMIT: u32 = 6; // Max ~64 spins before yield
-
-            while (!self.latch.probe()) {
-                // Try our deque
+            // Fast path: try to pop without checking latch first
+            // At deep depths, our job is almost always at the bottom of our deque
+            while (true) {
                 if (worker.pop()) |popped_job| {
                     if (popped_job == &self.job) {
+                        // Found our job! Caller will run it inline.
                         return null;
                     }
+                    // Not our job - execute it and keep looking
                     if (popped_job.handler) |handler| {
                         handler(task, popped_job);
                     }
-                    spin_backoff = 0; // Reset backoff on successful work
+                    continue;
+                }
+
+                // Deque is empty. Either job was stolen, or we just executed everything.
+                // Check if job was stolen and completed.
+                if (self.latch.probe()) {
+                    return self.result;
+                }
+
+                // Job was stolen but not yet complete. Enter work-stealing wait.
+                break;
+            }
+
+            // Work-stealing wait loop with adaptive backoff
+            // Balance between CPU burn and latency for fast stolen jobs
+            const SPIN_LIMIT: u32 = 5; // 2^5 = 32 spins before yielding
+            var backoff: u32 = 0;
+            var spins_since_latch_check: u32 = 0;
+
+            while (!self.latch.probe()) {
+                // Try our deque first (in case work was pushed)
+                if (worker.pop()) |popped_job| {
+                    if (popped_job.handler) |handler| {
+                        handler(task, popped_job);
+                    }
+                    backoff = 0; // Reset backoff on successful work
+                    spins_since_latch_check = 0;
                     continue;
                 }
 
@@ -199,22 +169,27 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
                     if (stolen_job.handler) |handler| {
                         handler(task, stolen_job);
                     }
-                    spin_backoff = 0; // Reset backoff on successful work
+                    backoff = 0; // Reset backoff on successful work
+                    spins_since_latch_check = 0;
                     continue;
                 }
 
-                // Exponential backoff spin (1, 2, 4, 8, 16, 32, 64 spins)
-                // NOTE: We check latch AFTER spinning, not during each spin.
-                // This reduces atomic operations from O(spins) to O(1) per backoff level.
-                // The while loop condition already checks the latch each iteration.
-                if (spin_backoff < SPIN_LIMIT) {
-                    const spins = @as(u32, 1) << @intCast(spin_backoff);
+                // No work found - adaptive backoff
+                // Check latch frequently at low backoff (fast jobs complete quickly)
+                if (backoff < SPIN_LIMIT) {
+                    const spins = @as(u32, 1) << @intCast(backoff);
                     for (0..spins) |_| {
                         std.atomic.spinLoopHint();
+                        spins_since_latch_check += 1;
+                        // Check latch every 8 spins to catch fast completions
+                        if (spins_since_latch_check >= 8) {
+                            if (self.latch.probe()) break;
+                            spins_since_latch_check = 0;
+                        }
                     }
-                    spin_backoff += 1;
+                    backoff += 1;
                 } else {
-                    // Heavy wait - yield to OS
+                    // Heavy wait - yield to OS scheduler
                     std.Thread.yield() catch {};
                 }
             }
@@ -224,23 +199,7 @@ pub fn Future(comptime Input: type, comptime Output: type) type {
 
         /// Try to steal work from other workers in the pool.
         fn tryStealFromOthers(self_worker: *Worker) ?*Job {
-            const pool = self_worker.pool;
-            const num_workers = pool.num_workers;
-            if (num_workers <= 1) return null;
-
-            const start = self_worker.rng.nextBounded(num_workers);
-
-            for (0..num_workers) |offset| {
-                const victim_idx = (start + offset) % num_workers;
-                if (victim_idx == self_worker.id) continue;
-
-                const victim = pool.workers[victim_idx] orelse continue;
-                if (victim.steal()) |job| {
-                    return job;
-                }
-            }
-
-            return null;
+            return self_worker.pool.tryStealFromOthers(self_worker);
         }
     };
 }

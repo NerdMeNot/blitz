@@ -323,7 +323,8 @@ pub fn recurse(
         const right = v[part.mid + 1 ..];
 
         // Decide sequential vs parallel recursion
-        if (@max(left.len, right.len) <= MAX_SEQUENTIAL) {
+        // Use adaptive threshold that scales with worker count
+        if (@max(left.len, right.len) <= helpers.getSequentialThreshold()) {
             // Sequential: recurse into shorter side first
             if (left.len < right.len) {
                 recurse(T, left, is_less, pred, limit);

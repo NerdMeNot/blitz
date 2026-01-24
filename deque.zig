@@ -4,7 +4,7 @@
 //! - Owner pushes/pops from bottom (LIFO for cache locality)
 //! - Thieves steal from top (FIFO for load balancing)
 //!
-//! This is the core data structure that enables Rayon-style instant stealing.
+//! This is the core data structure for instant work-stealing.
 //! Multiple thieves can steal simultaneously without blocking.
 //!
 //! Reference: "Dynamic Circular Work-Stealing Deque" by Chase and Lev (2005)
@@ -84,8 +84,7 @@ pub fn Deque(comptime T: type) type {
         }
 
         /// Deinitialize and free the buffer.
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            _ = allocator; // Use stored allocator
+        pub fn deinit(self: *Self) void {
             self.allocator.free(self.buffer);
             self.* = undefined;
         }
@@ -264,7 +263,7 @@ pub fn Deque(comptime T: type) type {
 
 test "Deque - basic push and pop" {
     var deque = try Deque(u32).init(std.testing.allocator, 16);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     // Push some items
     deque.push(1);
@@ -282,7 +281,7 @@ test "Deque - basic push and pop" {
 
 test "Deque - steal from empty" {
     var deque = try Deque(u32).init(std.testing.allocator, 16);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     const result = deque.steal();
     try std.testing.expectEqual(StealResult.empty, result.result);
@@ -291,7 +290,7 @@ test "Deque - steal from empty" {
 
 test "Deque - steal FIFO order" {
     var deque = try Deque(u32).init(std.testing.allocator, 16);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     // Push items
     deque.push(1);
@@ -316,7 +315,7 @@ test "Deque - steal FIFO order" {
 
 test "Deque - single item race" {
     var deque = try Deque(u32).init(std.testing.allocator, 16);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     // Push one item
     deque.push(42);
@@ -330,7 +329,7 @@ test "Deque - single item race" {
 
 test "Deque - stealLoop" {
     var deque = try Deque(u32).init(std.testing.allocator, 16);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     deque.push(100);
     deque.push(200);
@@ -343,7 +342,7 @@ test "Deque - stealLoop" {
 
 test "Deque - wrap around" {
     var deque = try Deque(u32).init(std.testing.allocator, 4);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     // Push and pop to advance indices
     for (0..10) |i| {

@@ -31,11 +31,11 @@ This document describes the internal architecture of Blitz, including component 
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      SCHEDULER (pool.zig + worker.zig)                       │
-│  • ThreadPool with lock-free job injection                                   │
-│  • Rayon-style idle/sleeping state tracking                                  │
-│  • Smart wake: notifyNewJobs() only wakes when needed                        │
-│  • Progressive sleep: spin → yield → futex wait                              │
+│                      SCHEDULER (pool.zig)                                    │
+│  • ThreadPool with Rayon-style JEC (Jobs Event Counter) protocol             │
+│  • AtomicCounters: packed u64 with sleeping/inactive/JEC counters            │
+│  • CoreLatch: 4-state protocol (UNSET→SLEEPY→SLEEPING→SET)                   │
+│  • Progressive sleep: 32 yields → announce sleepy → sleep                    │
 │  • Background workers with Chase-Lev deques                                  │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -53,21 +53,22 @@ This document describes the internal architecture of Blitz, including component 
 
 ### ThreadPool (pool.zig)
 
-The thread pool manages worker threads and coordinates work distribution.
+The thread pool manages worker threads and coordinates work distribution using Rayon-style sleep protocol.
 
 ```
 ThreadPool
 ├── allocator: Allocator           // For worker/deque allocation
-├── workers: []?*Worker            // Fixed array of workers
+├── workers: []Worker              // Background workers
+├── main_worker: Worker            // For external call() invocations
 ├── num_workers: usize             // Worker count
 ├── threads: []Thread              // OS thread handles
 │
-├── wake_futex: Atomic(u32)        // Futex for sleep/wake
-├── idle_count: Atomic(u32)        // Workers awake but polling
-├── sleeping_count: Atomic(u32)    // Workers blocked on futex
-├── stopping: Atomic(bool)         // Shutdown flag
+├── sleep: Sleep                   // Sleep manager with JEC protocol
+│   ├── counters: AtomicCounters   // Packed u64: sleeping|inactive|JEC
+│   └── worker_sleep_states: []WorkerSleepState
 │
-├── injected_jobs: Atomic(u64)     // Treiber stack for external jobs
+├── injected_jobs_head: *Node      // Treiber stack for external jobs
+├── stopping: Atomic(bool)         // Shutdown flag
 └── workers_ready: Semaphore       // Startup synchronization
 ```
 
@@ -97,7 +98,7 @@ ThreadPool
         │   (bottom--, CAS if last)        │
    ```
 
-### Worker (worker.zig)
+### Worker (pool.zig)
 
 Each worker thread maintains local state for efficient work distribution.
 
@@ -107,39 +108,50 @@ Worker (per thread)
 ├── id: u32                        // Worker index
 ├── deque: ?Deque(*Job)            // Chase-Lev deque (256 slots)
 ├── rng: XorShift64Star            // For randomized victim selection
+├── latch: CoreLatch               // 4-state sleep coordination
 └── stats: WorkerStats             // jobs_executed, jobs_stolen
 ```
 
-**Worker Loop State Machine**:
+**Worker Loop State Machine** (Rayon-style with JEC):
 
 ```
                     ┌──────────────────┐
                     │      ACTIVE      │
-                    │  (spinning)      │
-                    │  rounds < 64     │
+                    │  (executing)     │
                     └────────┬─────────┘
                              │ no work found
                              ▼
                     ┌──────────────────┐
-                    │      IDLE        │
-                    │  (yielding)      │
-                    │  64 ≤ rounds     │
-                    │      < 256       │
-                    │  idle_count++    │
+                    │   YIELD PHASE    │
+                    │  rounds 0-31     │
+                    │  yield() each    │
+                    │  inactive_count++│
                     └────────┬─────────┘
                              │ still no work
                              ▼
                     ┌──────────────────┐
+                    │  ANNOUNCE SLEEPY │
+                    │  round 32        │
+                    │  JEC even→odd    │
+                    │  save snapshot   │
+                    └────────┬─────────┘
+                             │ one more yield
+                             ▼
+                    ┌──────────────────┐
                     │    SLEEPING      │
-                    │  (futex wait)    │
-                    │  idle_count--    │
+                    │  round 34+       │
+                    │  CoreLatch:      │
+                    │  UNSET→SLEEPY    │
+                    │  SLEEPY→SLEEPING │
                     │  sleeping_count++│
+                    │  condvar.wait()  │
                     └────────┬─────────┘
                              │ wake signal
+                             │ (waker decrements sleeping)
                              ▼
                     ┌──────────────────┐
                     │      ACTIVE      │
-                    │  sleeping_count--│
+                    │  rounds = 0      │
                     └──────────────────┘
 ```
 
@@ -354,24 +366,24 @@ With SLEEPY state (safe):
 
 ## Key Design Decisions
 
-### 1. Lock-Free Wake via Futex
+### 1. Rayon-Style JEC Protocol
 
-Traditional pools use mutex + condition variable:
-```c
-// Slow: ~100-300ns
-mutex_lock(&mtx);
-cond_signal(&cv);
-mutex_unlock(&mtx);
-```
-
-Blitz uses futex directly:
+Prevents missed wakes through Jobs Event Counter toggling:
 ```zig
-// Fast: ~5-10ns
-if (sleeping_count.load(.monotonic) > 0) {
-    _ = wake_futex.fetchAdd(1, .release);
-    Futex.wake(&wake_futex, 1);
+// When posting work
+fn newJobs(self: *Sleep, ...) void {
+    // Toggle JEC even→odd to signal "new work available"
+    const old = self.counters.incrementJecIfSleepy();
+
+    // Only wake sleeping workers (idle workers will find work naturally)
+    const sleeping = extractSleeping(old);
+    if (sleeping > 0) {
+        self.wakeThreads(@min(num_jobs, sleeping));
+    }
 }
 ```
+
+Workers check JEC snapshot before sleeping to detect work posted during transition.
 
 ### 2. Stack-Allocated Futures
 
@@ -412,22 +424,27 @@ if (worker.pop()) |job| {
 while (!latch.probe()) { ... }
 ```
 
-### 4. Rayon-Style Idle Tracking
+### 4. Packed AtomicCounters
 
-Two separate counters for efficient wake decisions:
+All sleep state in a single u64 for atomic multi-field operations:
 
-- `idle_count`: Workers awake but polling (will find work naturally)
-- `sleeping_count`: Workers blocked on futex (need explicit wake)
+```
+AtomicCounters (u64):
+├── Bits 0-15:  sleeping_threads (blocked on condvar)
+├── Bits 16-31: inactive_threads (not executing work)
+└── Bits 32-63: JEC (even=sleepy, odd=active)
+```
 
 ```zig
-pub fn notifyNewJobs(self: *ThreadPool, num_jobs: u32, queue_was_empty: bool) void {
-    const num_sleepers = self.sleeping_count.load(.monotonic);
-    if (num_sleepers == 0) return;  // Awake workers will find work
+fn newJobs(self: *Sleep, num_jobs: u32, queue_was_empty: bool) void {
+    const old = self.counters.incrementJecIfSleepy();
+    const sleeping = extractSleeping(old);
+    const inactive = extractInactive(old);
+    const awake_but_idle = inactive -| sleeping;
 
-    const num_idle = self.idle_count.load(.monotonic);
-    // Only wake if work is piling up OR no idle workers
-    if (!queue_was_empty or num_idle == 0) {
-        wake(1);
+    // Only wake if not enough idle workers to grab the work
+    if (queue_was_empty and awake_but_idle < num_jobs) {
+        self.wakeThreads(@min(num_jobs - awake_but_idle, sleeping));
     }
 }
 ```

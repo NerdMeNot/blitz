@@ -27,6 +27,10 @@ fn getNumWorkers() usize {
 /// Each split halves the remaining count until we reach 0, at which point
 /// we execute sequentially.
 ///
+/// Implements Rayon-style thief-splitting: when work is stolen, the thief
+/// resets its split counter to allow further subdivision. This ensures
+/// stolen work generates enough parallelism for the stealing thread's subtree.
+///
 /// Usage:
 /// ```zig
 /// var splitter = Splitter.init();
@@ -49,16 +53,20 @@ pub const Splitter = struct {
     /// Starts at num_workers, halves on each split.
     splits: usize,
 
+    /// Initial split count (for thief-splitting reset).
+    initial_splits: usize,
+
     /// Initialize a splitter with parallelism matching thread count.
     /// Creates log2(num_workers) levels of parallelism.
     pub fn init() Splitter {
-        return .{ .splits = getNumWorkers() };
+        const workers = getNumWorkers();
+        return .{ .splits = workers, .initial_splits = workers };
     }
 
     /// Initialize with a specific split count.
     /// Use this for testing or custom parallelism levels.
     pub fn initWithSplits(splits: usize) Splitter {
-        return .{ .splits = splits };
+        return .{ .splits = splits, .initial_splits = splits };
     }
 
     /// Decide whether to split work.
@@ -73,11 +81,20 @@ pub const Splitter = struct {
         return false;
     }
 
-    /// Version with migration hint for future optimization.
-    /// Currently ignores the hint, but API allows future thief-splitting.
-    pub fn trySplitWithHint(self: *Splitter, _: bool) bool {
-        // TODO: Implement thief-splitting when migration detection is added
-        // For now, use simple halving
+    /// Thief-splitting aware version.
+    ///
+    /// When `migrated=true`, the work was stolen by another thread. In this case,
+    /// we reset the split counter to allow the thief to generate more parallelism
+    /// in its subtree. This is the key optimization from Rayon.
+    ///
+    /// When `migrated=false`, the work is still on the original thread, so we
+    /// continue halving as usual.
+    pub fn trySplitWithHint(self: *Splitter, migrated: bool) bool {
+        if (migrated) {
+            // Work was stolen! Reset to initial splits so thief can subdivide.
+            // This ensures stolen work generates enough tasks for the thief's cores.
+            self.splits = self.initial_splits;
+        }
         return self.trySplit();
     }
 
@@ -95,7 +112,7 @@ pub const Splitter = struct {
     /// Clone the splitter for passing to forked tasks.
     /// Each branch gets its own split counter.
     pub fn clone(self: *const Splitter) Splitter {
-        return .{ .splits = self.splits };
+        return .{ .splits = self.splits, .initial_splits = self.initial_splits };
     }
 };
 
@@ -108,6 +125,9 @@ pub const Splitter = struct {
 /// This prevents:
 /// 1. Creating too many tiny tasks (overhead kills speedup)
 /// 2. Creating too few tasks for large data (underutilized cores)
+///
+/// Also supports thief-splitting: when work is stolen, the thief can reset
+/// the split counter to generate more parallelism in its subtree.
 pub const LengthSplitter = struct {
     inner: Splitter,
     min_len: usize,
@@ -135,7 +155,9 @@ pub const LengthSplitter = struct {
             const min_splits = len / max_len;
             if (min_splits > splitter.splits) {
                 // Round up to next power of 2 for balanced tree
-                splitter.splits = std.math.ceilPowerOfTwo(usize, min_splits) catch min_splits;
+                const new_splits = std.math.ceilPowerOfTwo(usize, min_splits) catch min_splits;
+                splitter.splits = new_splits;
+                splitter.initial_splits = new_splits;
             }
         }
 
@@ -170,12 +192,15 @@ pub const LengthSplitter = struct {
         return self.inner.trySplit();
     }
 
-    /// Version with migration hint for future optimization.
-    pub fn trySplitWithHint(self: *LengthSplitter, len: usize, hint: bool) bool {
+    /// Thief-splitting aware version.
+    ///
+    /// When `migrated=true`, the work was stolen by another thread.
+    /// This resets the split counter to allow more subdivision.
+    pub fn trySplitWithHint(self: *LengthSplitter, len: usize, migrated: bool) bool {
         if (len < self.min_len) {
             return false;
         }
-        return self.inner.trySplitWithHint(hint);
+        return self.inner.trySplitWithHint(migrated);
     }
 
     /// Check if we should split without consuming.
@@ -234,6 +259,23 @@ test "Splitter - clone preserves state" {
     // Clone should have same state
     const cloned = splitter.clone();
     try std.testing.expectEqual(@as(usize, 2), cloned.remaining());
+    try std.testing.expectEqual(@as(usize, 8), cloned.initial_splits);
+}
+
+test "Splitter - thief-splitting resets on migration" {
+    var splitter = Splitter.initWithSplits(8);
+
+    _ = splitter.trySplit(); // 8 -> 4
+    _ = splitter.trySplit(); // 4 -> 2
+    try std.testing.expectEqual(@as(usize, 2), splitter.remaining());
+
+    // Simulate migration (work was stolen) - should reset splits
+    _ = splitter.trySplitWithHint(true); // Reset to 8, then 8 -> 4
+    try std.testing.expectEqual(@as(usize, 4), splitter.remaining());
+
+    // Without migration hint, continue halving normally
+    _ = splitter.trySplitWithHint(false); // 4 -> 2
+    try std.testing.expectEqual(@as(usize, 2), splitter.remaining());
 }
 
 test "LengthSplitter - respects min_len" {

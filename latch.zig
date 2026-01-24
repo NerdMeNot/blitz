@@ -1,7 +1,7 @@
 //! Synchronization Primitives for Blitz
 //!
 //! Lightweight synchronization using futex for blocking.
-//! Implements Rayon's 4-state latch protocol for robust wake guarantees.
+//! Implements a 4-state latch protocol for robust wake guarantees.
 //!
 //! ## Memory Ordering
 //!
@@ -22,8 +22,6 @@
 //! - Thread A marks SLEEPY (announces intent to sleep)
 //! - Thread A checks latch again (sees SET if B set it)
 //! - Only if still not set, Thread A transitions to SLEEPING
-//!
-//! Reference: Rayon's latch.rs and sleep/README.md
 
 const std = @import("std");
 const Futex = std.Thread.Futex;
@@ -112,7 +110,6 @@ pub const OnceLatch = struct {
     }
 
     /// Check if done (non-blocking). Use this in hot loops before wait().
-    /// This is the equivalent of Rayon's latch.probe().
     ///
     /// Memory ordering: Acquire ensures we see all writes that happened before setDone().
     pub inline fn probe(self: *const OnceLatch) bool {

@@ -20,6 +20,7 @@ pub const CHUNK_SIZE = aggregations.CHUNK_SIZE;
 pub const sum = aggregations.sum;
 pub const min = aggregations.min;
 pub const max = aggregations.max;
+pub const dotProduct = aggregations.dotProduct;
 
 // Re-export argmin/argmax functions
 pub const ArgResult = argminmax.ArgResult;
@@ -36,6 +37,7 @@ pub const isSimdCompatible = search.isSimdCompatible;
 pub const parallelSum = parallel.parallelSum;
 pub const parallelMin = parallel.parallelMin;
 pub const parallelMax = parallel.parallelMax;
+pub const parallelDotProduct = parallel.parallelDotProduct;
 pub const parallelArgmin = parallel.parallelArgmin;
 pub const parallelArgmax = parallel.parallelArgmax;
 pub const parallelArgminByKey = parallel.parallelArgminByKey;

@@ -5,7 +5,7 @@
 const std = @import("std");
 const Deque = @import("deque.zig").Deque;
 const StealResult = @import("deque.zig").StealResult;
-const mod = @import("mod.zig");
+const mod = @import("blitz.zig");
 
 // ============================================================================
 // Concurrent Deque Stress Tests
@@ -17,7 +17,7 @@ test "Deque - concurrent producer-stealers stress" {
     const NUM_STEALERS: usize = 4;
 
     var deque = try Deque(u32).init(std.testing.allocator, 16384);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     var stolen_counts: [NUM_STEALERS]usize = [_]usize{0} ** NUM_STEALERS;
     var producer_done = std.atomic.Value(bool).init(false);
@@ -74,7 +74,7 @@ test "Deque - high contention steal" {
     const NUM_STEALERS: usize = 8;
 
     var deque = try Deque(u32).init(std.testing.allocator, 256);
-    defer deque.deinit(std.testing.allocator);
+    defer deque.deinit();
 
     // Pre-fill deque
     for (0..NUM_ITEMS) |i| {

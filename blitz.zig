@@ -20,7 +20,7 @@
 //!
 //! Usage:
 //! ```zig
-//! const blitz = @import("blitz/mod.zig");
+//! const blitz = @import("blitz");
 //!
 //! // Initialize (optional - auto-inits on first use)
 //! try blitz.init();
@@ -53,18 +53,17 @@
 
 const std = @import("std");
 
-// Core types
-pub const Job = @import("job.zig").Job;
+// Core types - all from pool.zig
+const pool = @import("pool.zig");
+pub const Job = pool.Job;
+pub const Worker = pool.Worker;
+pub const Task = pool.Task;
+pub const ThreadPool = pool.ThreadPool;
+pub const ThreadPoolConfig = pool.ThreadPoolConfig;
 
 pub const OnceLatch = @import("latch.zig").OnceLatch;
 pub const CountLatch = @import("latch.zig").CountLatch;
 pub const SpinWait = @import("latch.zig").SpinWait;
-
-pub const Worker = @import("worker.zig").Worker;
-pub const Task = @import("worker.zig").Task;
-
-pub const ThreadPool = @import("pool.zig").ThreadPool;
-pub const ThreadPoolConfig = @import("pool.zig").ThreadPoolConfig;
 
 pub const Future = @import("future.zig").Future;
 
@@ -131,8 +130,8 @@ pub const getWorkerCount = numWorkers;
 // New Rayon-Parity Features
 // ============================================================================
 
-// Parallel iterators (Rayon-style composable iterators)
-pub const iter_mod = @import("iter/mod.zig");
+// Parallel iterators (composable iterators)
+pub const iter_mod = @import("iter/iter.zig");
 pub const iter = iter_mod.iter;
 pub const iterMut = iter_mod.iterMut;
 pub const range = iter_mod.range;
@@ -167,7 +166,7 @@ pub const parallelFindValue = algorithms.parallelFindValue;
 pub const parallelPartition = algorithms.parallelPartition;
 
 // SIMD-optimized aggregations (parallel + vectorized)
-pub const simd_mod = @import("simd/mod.zig");
+pub const simd_mod = @import("simd/simd.zig");
 pub const simdSum = simd_mod.sum;
 pub const simdMin = simd_mod.min;
 pub const simdMax = simd_mod.max;
@@ -240,23 +239,22 @@ pub const XorShift64Star = @import("internal/rng.zig").XorShift64Star;
 // ============================================================================
 
 test "blitz - all modules compile" {
+    _ = @import("pool.zig");
     _ = @import("job.zig");
     _ = @import("latch.zig");
     _ = @import("future.zig");
-    _ = @import("worker.zig");
-    _ = @import("pool.zig");
     _ = @import("api.zig");
     _ = @import("sync.zig");
     _ = @import("scope.zig");
     _ = @import("algorithms.zig");
     _ = @import("deque.zig");
     // Modular imports
-    _ = @import("internal/mod.zig");
-    _ = @import("iter/mod.zig");
-    _ = @import("simd/mod.zig");
-    _ = @import("sort/mod.zig");
-    // Stress tests
-    _ = @import("stress_tests.zig");
+    _ = @import("internal/internal.zig");
+    _ = @import("iter/iter.zig");
+    _ = @import("simd/simd.zig");
+    _ = @import("sort/sort.zig");
+    // Stress tests (run separately: zig build test -Doptimize=ReleaseFast)
+    // _ = @import("stress_tests.zig");
 }
 
 test "blitz - basic parallel for" {

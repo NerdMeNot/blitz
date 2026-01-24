@@ -1,7 +1,7 @@
 //! Sort Module Tests
 
 const std = @import("std");
-const mod = @import("mod.zig");
+const mod = @import("sort.zig");
 const helpers = @import("helpers.zig");
 const pdqsort = @import("pdqsort.zig");
 const by_key = @import("by_key.zig");

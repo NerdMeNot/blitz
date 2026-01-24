@@ -27,18 +27,22 @@ zig fmt .
 
 ## Project Structure
 
-- `api.zig` - Public high-level API entry point
-- `mod.zig` - Library module definition
+### Core Files
+- `api.zig` - Public high-level API entry point (what users import as "blitz")
+- `blitz.zig` - Library module definition (test entry point)
 - `pool.zig` - ThreadPool with lock-free futex wake
-- `worker.zig` - Worker threads and Task management
 - `deque.zig` - Chase-Lev lock-free work-stealing deque
 - `future.zig` - Future for fork-join operations
 - `job.zig` - Minimal Job struct
-- `latch.zig` - Synchronization primitives
+- `latch.zig` - Synchronization primitives (OnceLatch, CountLatch, SpinWait)
+- `sleep.zig` - Progressive sleep manager for workers
 - `scope.zig` - Scope-based parallelism
 - `algorithms.zig` - Parallel algorithms (sort, scan, find)
 - `sync.zig` - SyncPtr for lock-free parallel writes
-- `iter/` - Parallel iterators (Rayon-style composable)
+
+### Subdirectories
+- `ops/` - API tests (split from api.zig for smaller files)
+- `iter/` - Parallel iterators (composable)
 - `simd/` - SIMD-accelerated operations
 - `sort/` - Parallel PDQSort implementation
 - `internal/` - Internal utilities (threshold, splitter, rng)
