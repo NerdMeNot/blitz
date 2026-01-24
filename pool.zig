@@ -728,7 +728,6 @@ pub const ThreadPool = struct {
         // 3. Global injected queue
         return self.popInjectedJob();
     }
-
 };
 
 /// Execute a job. Minimal overhead - no stats in hot path.

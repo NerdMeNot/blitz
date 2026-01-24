@@ -80,7 +80,6 @@ pub const defaultGrainSize = runtime.defaultGrainSize;
 /// Thread-local task context for fast recursive calls.
 /// Access via ops/runtime.zig directly for read/write.
 /// (Threadlocal variables cannot be re-exported as pointers.)
-
 /// Initialize the global thread pool.
 pub const init = runtime.init;
 
