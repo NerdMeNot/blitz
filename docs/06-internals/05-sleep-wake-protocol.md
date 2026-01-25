@@ -40,11 +40,15 @@ AtomicCounters (u64):
 
 **When worker announces intent to sleep (Round 32):**
 ```zig
-// Worker saves current JEC value
-const old = self.counters.incrementJecIfSleepy();
-idle.jobs_counter = AtomicCounters.extractJec(old);
-// JEC toggled from even to odd (if it was even)
+// Worker toggles JEC, then saves CURRENT value (not the old value!)
+_ = self.counters.incrementJecIfSleepy();
+idle.jobs_counter = AtomicCounters.extractJec(self.counters.loadSeqCst());
 ```
+
+**Why save CURRENT, not old?** If we saved the old value (before toggle), the worker
+that toggled JEC would immediately see "JEC changed" when comparing current JEC to
+its snapshot—even though no new work arrived. This causes a "partial wake storm"
+where workers never reach condvar sleep.
 
 **When poster submits work:**
 ```zig
@@ -68,16 +72,18 @@ if (jec_now != idle.jobs_counter) {
 
 ```
 With JEC (SAFE):
-  Worker A: jec_snapshot = JEC      // Save current value
-  Worker A: JEC = odd (announce)
+  Worker A: JEC = odd (announce)    // Toggle if even
+  Worker A: jec_snapshot = JEC      // Save CURRENT value (after toggle)
   Worker A: if (!hasWork) {         Poster B: postWork();
-  Worker A:                         Poster B: JEC = odd (already odd, no-op)
-  Worker A:   if (JEC != snapshot)  // JEC changed!
+  Worker A:                         Poster B: JEC++ (toggle again)
+  Worker A:   if (JEC != snapshot)  // JEC changed by poster!
   Worker A:     wake();             // Don't sleep, go find work
             }
 ```
 
-The key insight: by checking JEC *after* registering intent to sleep, the worker can detect any work posted during the transition period.
+The key insight: by saving JEC *after* toggling and checking it *before* sleeping,
+the worker detects any work posted during the transition. Saving after toggle
+prevents the worker from "seeing its own toggle" as a change.
 
 ## Progressive Sleep
 
