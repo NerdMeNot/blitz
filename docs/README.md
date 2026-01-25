@@ -63,7 +63,8 @@ Blitz achieves **1.3-5x speedup** over Rust's Rayon on equivalent benchmarks:
 |----------|-------------|
 | [Core API](03-api/01-core-api.md) | Complete function reference |
 | [Iterators API](03-api/02-iterators-api.md) | Iterator method reference |
-| [Sort API](03-api/04-sort-api.md) | Sorting function reference |
+| [Sort API](03-api/03-sort-api.md) | Sorting function reference |
+| [Internal API](03-api/04-internal-api.md) | Internal utilities reference |
 
 ### 4. Algorithms (Internals)
 
@@ -72,8 +73,9 @@ Blitz achieves **1.3-5x speedup** over Rust's Rayon on equivalent benchmarks:
 | [Work Stealing](04-algorithms/01-work-stealing.md) | Chase-Lev deque algorithm |
 | [Chase-Lev Deque](04-algorithms/02-chase-lev-deque.md) | Lock-free deque implementation |
 | [PDQSort](04-algorithms/03-pdqsort.md) | Pattern-defeating quicksort |
-| [Parallel Reduction](04-algorithms/05-parallel-reduction.md) | Tree reduction strategy |
-| [Adaptive Splitting](04-algorithms/06-adaptive-splitting.md) | Dynamic grain size |
+| [Parallel Reduction](04-algorithms/04-parallel-reduction.md) | Tree reduction strategy |
+| [Adaptive Splitting](04-algorithms/05-adaptive-splitting.md) | Dynamic grain size |
+| [Early Exit Operations](04-algorithms/06-early-exit-operations.md) | Find, any, all with early termination |
 
 ### 5. Testing & Benchmarking
 
