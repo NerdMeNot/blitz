@@ -10,7 +10,7 @@ const blitz = @import("blitz");
 // Parallel sum - one line, auto-parallelized
 const sum = blitz.iter(i64, data).sum();
 
-// Parallel min/max with SIMD optimization
+// Parallel min/max
 const min = blitz.iter(i64, data).min();
 
 // Parallel search with early exit
@@ -53,7 +53,6 @@ Blitz achieves **1.3-5x speedup** over Rust's Rayon on equivalent benchmarks:
 | [Iterators](02-usage/05-iterators.md) | **Recommended API** - Rayon-style composable iterators |
 | [Fork-Join](02-usage/04-fork-join.md) | Divide and conquer parallelism |
 | [Sorting](02-usage/06-sorting.md) | Parallel PDQSort |
-| [SIMD Operations](02-usage/07-simd-operations.md) | Vectorized aggregations |
 | [Initialization](02-usage/01-initialization.md) | Thread pool configuration |
 | [Parallel For](02-usage/02-parallel-for.md) | Low-level parallel loops |
 | [Parallel Reduce](02-usage/03-parallel-reduce.md) | Low-level map-reduce |
@@ -64,7 +63,6 @@ Blitz achieves **1.3-5x speedup** over Rust's Rayon on equivalent benchmarks:
 |----------|-------------|
 | [Core API](03-api/01-core-api.md) | Complete function reference |
 | [Iterators API](03-api/02-iterators-api.md) | Iterator method reference |
-| [SIMD API](03-api/03-simd-api.md) | Vectorized function reference |
 | [Sort API](03-api/04-sort-api.md) | Sorting function reference |
 
 ### 4. Algorithms (Internals)
@@ -74,7 +72,6 @@ Blitz achieves **1.3-5x speedup** over Rust's Rayon on equivalent benchmarks:
 | [Work Stealing](04-algorithms/01-work-stealing.md) | Chase-Lev deque algorithm |
 | [Chase-Lev Deque](04-algorithms/02-chase-lev-deque.md) | Lock-free deque implementation |
 | [PDQSort](04-algorithms/03-pdqsort.md) | Pattern-defeating quicksort |
-| [SIMD Aggregations](04-algorithms/04-simd-aggregations.md) | Vectorized sum/min/max |
 | [Parallel Reduction](04-algorithms/05-parallel-reduction.md) | Tree reduction strategy |
 | [Adaptive Splitting](04-algorithms/06-adaptive-splitting.md) | Dynamic grain size |
 
@@ -101,7 +98,7 @@ Blitz achieves **1.3-5x speedup** over Rust's Rayon on equivalent benchmarks:
 
 | Operation | Code | Notes |
 |-----------|------|-------|
-| Sum | `blitz.iter(T, data).sum()` | SIMD-optimized |
+| Sum | `blitz.iter(T, data).sum()` | Parallel reduction |
 | Min/Max | `.min()` / `.max()` | Returns `?T` |
 | Find Any | `.findAny(pred)` | Non-deterministic, fast |
 | Find First | `.findFirst(pred)` | Deterministic order |

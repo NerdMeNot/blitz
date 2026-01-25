@@ -262,7 +262,6 @@ Implementation         Time       Speedup
 ──────────────────────────────────────────
 Sequential            35.2 ms    1.0x
 Parallel reduce       4.1 ms     8.6x
-Parallel + SIMD       1.2 ms     29.3x
 ```
 
 ## When to Use
@@ -270,8 +269,7 @@ Parallel + SIMD       1.2 ms     29.3x
 | Data Size | Recommendation |
 |-----------|----------------|
 | < 1,000 | Sequential (overhead too high) |
-| 1K - 100K | Parallel reduce |
-| > 100K | Parallel reduce + SIMD |
+| > 1,000 | Parallel reduce |
 
 Use threshold heuristics:
 

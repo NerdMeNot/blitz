@@ -54,7 +54,7 @@ fn benchmarkSum() void {
     for (data, 0..) |*v, i| v.* = @intCast(i);
 
     // Warmup
-    _ = blitz.simd_mod.parallelSum(i64, data);
+    _ = blitz.iter(i64, data).sum(i64, data);
 
     // Benchmark
     const iterations = 10;
@@ -62,7 +62,7 @@ fn benchmarkSum() void {
 
     for (0..iterations) |_| {
         const start = std.time.nanoTimestamp();
-        _ = blitz.simd_mod.parallelSum(i64, data);
+        _ = blitz.iter(i64, data).sum(i64, data);
         total_ns += std.time.nanoTimestamp() - start;
     }
 
@@ -85,7 +85,7 @@ fn benchmarkComparison() void {
 
     // Parallel
     const par_start = std.time.nanoTimestamp();
-    const par_sum = blitz.simd_mod.parallelSum(i64, data);
+    const par_sum = blitz.iter(i64, data).sum(i64, data);
     const par_time = std.time.nanoTimestamp() - par_start;
 
     // Verify correctness

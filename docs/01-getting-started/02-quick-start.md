@@ -305,7 +305,7 @@ fn mergeSort(data: []i32) void {
 
 ## Performance Tips
 
-1. **Use iterators for data processing** - SIMD-optimized aggregations
+1. **Use iterators for data processing** - Optimized parallel aggregations
 2. **Use fork-join for recursive algorithms** - Optimal work distribution
 3. **Set appropriate thresholds** - Switch to sequential below ~1000 elements
 4. **Avoid false sharing** - Don't write to adjacent memory from different threads

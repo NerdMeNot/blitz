@@ -76,11 +76,11 @@ fn processIndex(i: usize) void {
 
 ## ParIter(T) Methods
 
-### Aggregations (SIMD-Optimized)
+### Aggregations
 
 #### `sum() -> T`
 
-Compute the sum of all elements. Uses SIMD vectorization for numeric types.
+Compute the sum of all elements using parallel reduction.
 
 ```zig
 const data = [_]i64{ 1, 2, 3, 4, 5 };
@@ -95,7 +95,7 @@ const sum = blitz.iter(i64, &data).sum();  // 15
 
 #### `min() -> ?T`
 
-Find the minimum element. Uses SIMD vectorization.
+Find the minimum element using parallel reduction.
 
 ```zig
 const min = blitz.iter(i64, &data).min();  // ?i64
@@ -110,7 +110,7 @@ if (min) |m| {
 
 #### `max() -> ?T`
 
-Find the maximum element. Uses SIMD vectorization.
+Find the maximum element using parallel reduction.
 
 ```zig
 const max = blitz.iter(i64, &data).max();  // ?i64
@@ -600,7 +600,7 @@ fn square(i: usize) i64 {
 
 1. **Use `findAny` over `findFirst`** when order doesn't matter - it's faster
 2. **Use `any`/`all` for boolean checks** - early exit is very fast
-3. **Use SIMD aggregations** (`sum`, `min`, `max`) - they're vectorized
+3. **Use built-in aggregations** (`sum`, `min`, `max`) - optimized parallel reduction
 4. **Use `minByKey`/`maxByKey`** when you have a natural key - cleaner than `minBy`
 5. **Use `chunks_iter`** for complex per-chunk processing with custom reduction
 6. **Don't parallelize tiny data** - overhead exceeds benefit below ~1000 elements

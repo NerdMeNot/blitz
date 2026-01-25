@@ -268,7 +268,7 @@ Threshold guidelines:
 | Use Case | Best Choice | Why |
 |----------|-------------|-----|
 | Process array elements | `iter().forEach()` | Optimized for data parallelism |
-| Sum/min/max array | `iter().sum()` | SIMD-optimized |
+| Sum/min/max array | `iter().sum()` | Parallel reduction |
 | Two independent tasks | `join(.{...})` | Named results |
 | Recursive tree structure | `join(.{...})` | Natural recursion |
 | Transform elements | `iterMut().mapInPlace()` | In-place, parallel |

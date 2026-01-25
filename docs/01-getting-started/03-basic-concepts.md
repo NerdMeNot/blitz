@@ -143,32 +143,6 @@ blitz.parallelFor(input_data.len, Context, ctx, struct {
 2. **Explicit data flow** - Clear what's shared
 3. **Comptime optimization** - Struct access is fast
 
-## SIMD Integration
-
-Blitz combines multi-threading with SIMD for maximum throughput:
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    100M Elements                     │
-├─────────────┬─────────────┬─────────────┬───────────┤
-│  Worker 0   │  Worker 1   │  Worker 2   │ Worker 3  │
-│  25M each   │  25M each   │  25M each   │ 25M each  │
-├─────────────┼─────────────┼─────────────┼───────────┤
-│ SIMD lanes  │ SIMD lanes  │ SIMD lanes  │SIMD lanes │
-│ [8 floats]  │ [8 floats]  │ [8 floats]  │[8 floats] │
-└─────────────┴─────────────┴─────────────┴───────────┘
-```
-
-```zig
-// Parallel + SIMD sum (fastest)
-const sum = blitz.simd_mod.parallelSum(i64, data);
-
-// Compare throughput:
-// - Scalar:        0.5 billion elements/sec
-// - SIMD only:     2.0 billion elements/sec
-// - Parallel+SIMD: 9.0 billion elements/sec
-```
-
 ## Thread Pool Lifecycle
 
 ```zig

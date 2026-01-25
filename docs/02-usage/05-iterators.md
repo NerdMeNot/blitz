@@ -21,7 +21,7 @@ const count = it.count(); // 10
 
 ## Available Operations
 
-### Aggregations (SIMD-optimized)
+### Aggregations
 
 ```zig
 const it = blitz.iter(i64, data);
@@ -226,8 +226,8 @@ const sumOfSquares = mapped.sum();
 ```
 Operation: Find minimum in 10M elements
 
-Scalar loop:     45 ms
-SIMD (iter.min): 8 ms  (5.6x faster)
+Scalar loop:        45 ms
+Parallel iter.min:  8 ms  (5.6x faster)
 
 Operation: Any negative in 10M elements
 
@@ -237,7 +237,7 @@ Parallel any (early):  0.07 ms (500x faster with early exit)
 
 ## Best Practices
 
-1. **Use SIMD operations** for sum/min/max - they're vectorized
+1. **Use built-in aggregations** for sum/min/max - optimized parallel reduction
 2. **Use findAny** when order doesn't matter - faster than findFirst
 3. **Use predicates** (any/all) for boolean checks - early exit is fast
 4. **Prefer minByKey/maxByKey** over minBy when you have a natural key

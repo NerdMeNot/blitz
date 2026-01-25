@@ -166,7 +166,7 @@ const total = blitz.iter(i64, &data).sum();  // 15
 
 **Returns**: Sum of all elements (type `T`).
 
-**Performance**: O(n/p) where p = number of workers. Uses SIMD when applicable.
+**Performance**: O(n/p) where p = number of workers. Uses work-stealing for load balancing.
 
 **Limitations**:
 - Type must support `+` operator
@@ -193,7 +193,7 @@ if (blitz.iter(i64, &data).min()) |m| {
 
 **Returns**: `?T` - The minimum element, or `null` if the slice is empty.
 
-**Performance**: O(n/p). Uses SIMD when applicable.
+**Performance**: O(n/p). Uses work-stealing for load balancing.
 
 #### `.max() ?T`
 
@@ -795,34 +795,6 @@ try blitz.sortByCachedKey(Person, u32, allocator, &people, struct {
 **Memory**:
 - `sort`, `sortAsc`, `sortDesc`, `sortByKey`: O(log n) stack depth
 - `sortByCachedKey`: O(n) for key cache
-
-### Scan (Prefix Sum)
-
-#### `parallelScan(T, input, output) void`
-
-Compute inclusive prefix sum.
-
-```zig
-const input = [_]i64{ 1, 2, 3, 4, 5 };
-var output: [5]i64 = undefined;
-
-blitz.parallelScan(i64, &input, &output);
-// output = [1, 3, 6, 10, 15]
-// output[i] = sum of input[0..i+1]
-```
-
-#### `parallelScanExclusive(T, input, output) void`
-
-Compute exclusive prefix sum.
-
-```zig
-const input = [_]i64{ 1, 2, 3, 4, 5 };
-var output: [5]i64 = undefined;
-
-blitz.parallelScanExclusive(i64, &input, &output);
-// output = [0, 1, 3, 6, 10]
-// output[i] = sum of input[0..i]
-```
 
 ### Find and Partition
 

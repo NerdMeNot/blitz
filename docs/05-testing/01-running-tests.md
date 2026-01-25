@@ -23,8 +23,6 @@ blitz/
 ├── api.zig           # Integration tests
 ├── iter/
 │   └── tests.zig     # Iterator tests
-├── simd/
-│   └── tests.zig     # SIMD tests
 ├── sort/
 │   └── tests.zig     # Sorting tests
 ├── internal/
@@ -37,9 +35,6 @@ blitz/
 ```bash
 # Test iterators only
 zig test iter/mod.zig
-
-# Test SIMD only
-zig test simd/mod.zig
 
 # Test sorting only
 zig test sort/mod.zig
@@ -55,9 +50,9 @@ zig test internal/mod.zig
 Test individual functions in isolation:
 
 ```zig
-test "simd sum" {
+test "iterator sum" {
     const data = [_]i64{ 1, 2, 3, 4, 5 };
-    const result = simd.sum(i64, &data);
+    const result = blitz.iter(i64, &data).sum();
     try std.testing.expectEqual(@as(i64, 15), result);
 }
 ```
@@ -67,7 +62,7 @@ test "simd sum" {
 Test module interactions:
 
 ```zig
-test "parallel reduce with SIMD" {
+test "parallel sum" {
     try blitz.init();
     defer blitz.deinit();
 
