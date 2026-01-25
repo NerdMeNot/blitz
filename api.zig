@@ -50,6 +50,9 @@ pub const sort_mod = sort_impl;
 
 /// Parallel iterators.
 pub const iter_mod = @import("iter/iter.zig");
+pub const iter = iter_mod.iter;
+pub const iterMut = iter_mod.iterMut;
+pub const range = iter_mod.range;
 
 /// Internal utilities (threshold, splitter, rng).
 pub const internal = @import("internal/internal.zig");
