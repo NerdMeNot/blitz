@@ -5,6 +5,7 @@
 //! - AtomicCounters with packed sleeping/inactive/JEC counters
 //! - Progressive sleep: 32 rounds yield -> announce sleepy -> 1 more yield -> sleep
 //! - CoreLatch 4-state protocol for robust wake guarantees
+//! - JEC (Jobs Event Counter) protocol to prevent missed wakes
 
 const std = @import("std");
 const Deque = @import("deque.zig").Deque;
@@ -118,6 +119,7 @@ const AtomicCounters = struct {
     }
 
     /// Increment JEC if currently sleepy (even). Returns old counters.
+    /// Used by work posters to signal "new work available".
     /// SeqCst for the CAS ensures visibility across threads.
     fn incrementJecIfSleepy(self: *AtomicCounters) u64 {
         while (true) {
@@ -283,9 +285,12 @@ pub const Sleep = struct {
         }
 
         if (idle.rounds == ROUNDS_UNTIL_SLEEPY) {
-            // Announce sleepy: increment JEC if even, save snapshot
-            const old = self.counters.incrementJecIfSleepy();
-            idle.jobs_counter = AtomicCounters.extractJec(old);
+            // Announce sleepy: try to toggle JEC even→odd.
+            // IMPORTANT: Save the CURRENT JEC value after any toggle, not the old value.
+            // If we saved the old value, the worker that toggled would see
+            // "JEC changed" (due to its own action) and partial wake immediately.
+            _ = self.counters.incrementJecIfSleepy();
+            idle.jobs_counter = AtomicCounters.extractJec(self.counters.loadSeqCst());
             std.Thread.yield() catch {};
             return;
         }
@@ -306,6 +311,7 @@ pub const Sleep = struct {
         latch: *CoreLatch,
         pool: *ThreadPool,
     ) void {
+
         // Step 1: Try to transition latch UNSET -> SLEEPY
         if (!latch.getSleepy()) {
             idle.rounds = 0; // Latch was set, wake fully
@@ -379,7 +385,7 @@ pub const Sleep = struct {
     }
 
     fn newJobs(self: *Sleep, num_jobs: u32, queue_was_empty: bool) void {
-        // Toggle JEC to odd if even
+        // Toggle JEC to odd if even (signal new work)
         const old = self.counters.incrementJecIfSleepy();
         const sleeping = AtomicCounters.extractSleeping(old);
 
