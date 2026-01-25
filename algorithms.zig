@@ -2,7 +2,6 @@
 //!
 //! High-performance parallel algorithms including:
 //! - Parallel merge sort (O(n log n) work, O(log² n) span)
-//! - Parallel prefix sum / scan (O(n) work, O(log n) span)
 //! - Parallel partition (for quicksort)
 //! - Parallel find / search
 //!
@@ -10,13 +9,6 @@
 
 const std = @import("std");
 const api = @import("api.zig");
-const Future = @import("future.zig").Future;
-const Task = @import("worker.zig").Task;
-
-/// Get the number of worker threads.
-fn getWorkerCount() usize {
-    return @intCast(api.numWorkers());
-}
 
 // ============================================================================
 // Parallel Merge Sort
@@ -180,174 +172,6 @@ fn binarySearch(comptime T: type, arr: []const T, val: T, comptime lessThan: fn 
     }
 
     return lo;
-}
-
-// ============================================================================
-// Parallel Prefix Sum (Scan)
-// ============================================================================
-
-/// Threshold below which we switch to sequential scan.
-const SCAN_THRESHOLD: usize = 8192;
-
-/// Parallel inclusive prefix sum.
-/// output[i] = input[0] + input[1] + ... + input[i]
-pub fn parallelScan(comptime T: type, input: []const T, output: []T) void {
-    std.debug.assert(output.len >= input.len);
-
-    if (input.len == 0) return;
-
-    if (input.len <= SCAN_THRESHOLD) {
-        sequentialScan(T, input, output);
-        return;
-    }
-
-    // Blelloch scan algorithm (work-efficient parallel prefix sum)
-    // Phase 1: Upsweep (reduce)
-    // Phase 2: Downsweep (distribute)
-
-    parallelScanImpl(T, input, output);
-}
-
-/// Parallel exclusive prefix sum.
-/// output[i] = input[0] + input[1] + ... + input[i-1], output[0] = 0
-pub fn parallelScanExclusive(comptime T: type, input: []const T, output: []T) void {
-    std.debug.assert(output.len >= input.len);
-
-    if (input.len == 0) return;
-
-    if (input.len <= SCAN_THRESHOLD) {
-        sequentialScanExclusive(T, input, output);
-        return;
-    }
-
-    // Compute inclusive scan then shift
-    parallelScan(T, input, output);
-
-    // Shift right and insert 0
-    var i = input.len - 1;
-    while (i > 0) : (i -= 1) {
-        output[i] = output[i - 1];
-    }
-    output[0] = 0;
-}
-
-/// Internal parallel scan implementation.
-fn parallelScanImpl(comptime T: type, input: []const T, output: []T) void {
-    const n = input.len;
-
-    // Determine number of blocks
-    const num_workers: usize = @intCast(api.numWorkers());
-    const block_size = @max(SCAN_THRESHOLD, (n + num_workers - 1) / num_workers);
-    const num_blocks = (n + block_size - 1) / block_size;
-
-    if (num_blocks <= 1) {
-        sequentialScan(T, input, output);
-        return;
-    }
-
-    const actual_blocks = @min(num_blocks, 64);
-
-    // Phase 1: Local scans (parallel)
-    // Each block computes its local prefix sum
-    var block_sums: [64]T = undefined;
-
-    const Phase1Ctx = struct {
-        input: []const T,
-        output: []T,
-        block_sums: *[64]T,
-        block_size: usize,
-        n: usize,
-
-        const Self = @This();
-
-        pub fn body(ctx: Self, start_block: usize, end_block: usize) void {
-            for (start_block..end_block) |block_idx| {
-                const start = block_idx * ctx.block_size;
-                const end = @min(start + ctx.block_size, ctx.n);
-
-                if (start >= ctx.n) {
-                    ctx.block_sums[block_idx] = 0;
-                    continue;
-                }
-
-                // Local sequential scan
-                var sum: T = 0;
-                for (ctx.input[start..end], start..) |val, i| {
-                    sum += val;
-                    ctx.output[i] = sum;
-                }
-
-                ctx.block_sums[block_idx] = sum;
-            }
-        }
-    };
-
-    api.parallelFor(actual_blocks, Phase1Ctx, Phase1Ctx{
-        .input = input,
-        .output = output,
-        .block_sums = &block_sums,
-        .block_size = block_size,
-        .n = n,
-    }, Phase1Ctx.body);
-
-    // Phase 2: Scan block sums (sequential - small)
-    var prefix: T = 0;
-    for (0..actual_blocks) |i| {
-        const old = block_sums[i];
-        block_sums[i] = prefix;
-        prefix += old;
-    }
-
-    // Phase 3: Add block prefix to each element (parallel)
-    const Phase3Ctx = struct {
-        output: []T,
-        block_sums: *const [64]T,
-        block_size: usize,
-        n: usize,
-
-        const Self = @This();
-
-        pub fn body(ctx: Self, start_block: usize, end_block: usize) void {
-            for (start_block..end_block) |block_idx| {
-                if (block_idx == 0) continue; // First block has no prefix
-
-                const start = block_idx * ctx.block_size;
-                const end = @min(start + ctx.block_size, ctx.n);
-                const block_prefix = ctx.block_sums[block_idx];
-
-                for (ctx.output[start..end]) |*val| {
-                    val.* += block_prefix;
-                }
-            }
-        }
-    };
-
-    api.parallelFor(actual_blocks, Phase3Ctx, Phase3Ctx{
-        .output = output,
-        .block_sums = &block_sums,
-        .block_size = block_size,
-        .n = n,
-    }, Phase3Ctx.body);
-}
-
-/// Sequential inclusive scan.
-fn sequentialScan(comptime T: type, input: []const T, output: []T) void {
-    if (input.len == 0) return;
-
-    output[0] = input[0];
-    for (1..input.len) |i| {
-        output[i] = output[i - 1] + input[i];
-    }
-}
-
-/// Sequential exclusive scan.
-fn sequentialScanExclusive(comptime T: type, input: []const T, output: []T) void {
-    if (input.len == 0) return;
-
-    output[0] = 0;
-    for (1..input.len) |i| {
-        output[i] = output[i - 1] + input[i - 1];
-    }
 }
 
 // ============================================================================
@@ -657,32 +481,6 @@ test "parallelSort - basic" {
 
     try std.testing.expectEqual(@as(i64, 1), data[0]);
     try std.testing.expectEqual(@as(i64, 9), data[8]);
-}
-
-test "sequentialScan - inclusive" {
-    const input = [_]i64{ 1, 2, 3, 4, 5 };
-    var output: [5]i64 = undefined;
-
-    sequentialScan(i64, &input, &output);
-
-    try std.testing.expectEqual(@as(i64, 1), output[0]);
-    try std.testing.expectEqual(@as(i64, 3), output[1]);
-    try std.testing.expectEqual(@as(i64, 6), output[2]);
-    try std.testing.expectEqual(@as(i64, 10), output[3]);
-    try std.testing.expectEqual(@as(i64, 15), output[4]);
-}
-
-test "sequentialScanExclusive" {
-    const input = [_]i64{ 1, 2, 3, 4, 5 };
-    var output: [5]i64 = undefined;
-
-    sequentialScanExclusive(i64, &input, &output);
-
-    try std.testing.expectEqual(@as(i64, 0), output[0]);
-    try std.testing.expectEqual(@as(i64, 1), output[1]);
-    try std.testing.expectEqual(@as(i64, 3), output[2]);
-    try std.testing.expectEqual(@as(i64, 6), output[3]);
-    try std.testing.expectEqual(@as(i64, 10), output[4]);
 }
 
 test "sequentialPartition" {

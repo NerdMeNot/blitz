@@ -18,7 +18,6 @@
 
 const std = @import("std");
 const api = @import("../api.zig");
-const simd = @import("../simd/simd.zig");
 
 // Re-export sub-modules
 pub const find = @import("find.zig");
@@ -97,19 +96,34 @@ pub fn ParIter(comptime T: type) type {
             );
         }
 
-        /// Sum all elements using SIMD-optimized parallel reduction.
+        /// Sum all elements using parallel reduction.
         pub fn sum(self: Self) T {
-            return simd.parallelSum(T, self.data);
+            if (self.data.len == 0) return 0;
+            return self.reduce(0, struct {
+                fn add(a: T, b: T) T {
+                    return a + b;
+                }
+            }.add);
         }
 
-        /// Find the minimum element using SIMD-optimized parallel reduction.
+        /// Find the minimum element using parallel reduction.
         pub fn min(self: Self) ?T {
-            return simd.parallelMin(T, self.data);
+            if (self.data.len == 0) return null;
+            return minmax.minBy(T, self.data, struct {
+                fn cmp(a: T, b: T) std.math.Order {
+                    return std.math.order(a, b);
+                }
+            }.cmp);
         }
 
-        /// Find the maximum element using SIMD-optimized parallel reduction.
+        /// Find the maximum element using parallel reduction.
         pub fn max(self: Self) ?T {
-            return simd.parallelMax(T, self.data);
+            if (self.data.len == 0) return null;
+            return minmax.maxBy(T, self.data, struct {
+                fn cmp(a: T, b: T) std.math.Order {
+                    return std.math.order(a, b);
+                }
+            }.cmp);
         }
 
         /// Count elements.

@@ -51,9 +51,6 @@ pub const sort_mod = sort_impl;
 /// Parallel iterators.
 pub const iter_mod = @import("iter/iter.zig");
 
-/// SIMD operations.
-pub const simd_mod = @import("simd/simd.zig");
-
 /// Internal utilities (threshold, splitter, rng).
 pub const internal = @import("internal/internal.zig");
 
@@ -241,9 +238,6 @@ test {
 
     // Iterator module tests
     _ = @import("iter/tests.zig");
-
-    // SIMD module tests
-    _ = @import("simd/tests.zig");
 
     // Internal module tests
     _ = @import("internal/internal.zig");

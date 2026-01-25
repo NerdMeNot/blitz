@@ -159,41 +159,13 @@ pub const broadcastWithContext = scope_mod.broadcastWithContext;
 pub const algorithms = @import("algorithms.zig");
 pub const parallelSort = algorithms.parallelSort;
 pub const parallelSortBy = algorithms.parallelSortBy;
-pub const parallelScan = algorithms.parallelScan;
-pub const parallelScanExclusive = algorithms.parallelScanExclusive;
 pub const parallelFind = algorithms.parallelFind;
 pub const parallelFindValue = algorithms.parallelFindValue;
 pub const parallelPartition = algorithms.parallelPartition;
 
-// SIMD-optimized aggregations (parallel + vectorized)
-pub const simd_mod = @import("simd/simd.zig");
-pub const simdSum = simd_mod.sum;
-pub const simdMin = simd_mod.min;
-pub const simdMax = simd_mod.max;
-
-// SIMD parallel threshold (dynamic calculation based on worker count and operation cost)
-pub const calculateParallelThreshold = simd_mod.calculateParallelThreshold;
-pub const shouldParallelizeSimd = simd_mod.shouldParallelizeSimd;
-pub const getParallelThreshold = simd_mod.getParallelThreshold;
-
 // ============================================================================
 // Convenience Functions (Rayon-style simple API)
 // ============================================================================
-
-/// Parallel sum of all elements. Uses SIMD + multi-threading.
-pub fn parallelSum(comptime T: type, data: []const T) T {
-    return simd_mod.parallelSum(T, data);
-}
-
-/// Parallel minimum. Returns null for empty slices.
-pub fn parallelMin(comptime T: type, data: []const T) ?T {
-    return simd_mod.parallelMin(T, data);
-}
-
-/// Parallel maximum. Returns null for empty slices.
-pub fn parallelMax(comptime T: type, data: []const T) ?T {
-    return simd_mod.parallelMax(T, data);
-}
 
 /// Check if any element satisfies the predicate (parallel with early exit).
 pub fn parallelAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
@@ -240,7 +212,6 @@ pub const XorShift64Star = @import("internal/rng.zig").XorShift64Star;
 
 test "blitz - all modules compile" {
     _ = @import("pool.zig");
-    _ = @import("job.zig");
     _ = @import("latch.zig");
     _ = @import("future.zig");
     _ = @import("api.zig");
@@ -251,7 +222,6 @@ test "blitz - all modules compile" {
     // Modular imports
     _ = @import("internal/internal.zig");
     _ = @import("iter/iter.zig");
-    _ = @import("simd/simd.zig");
     _ = @import("sort/sort.zig");
     // Stress tests (run separately: zig build test -Doptimize=ReleaseFast)
     // _ = @import("stress_tests.zig");

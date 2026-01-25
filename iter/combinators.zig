@@ -9,7 +9,6 @@
 
 const std = @import("std");
 const api = @import("../api.zig");
-const simd = @import("../simd/simd.zig");
 
 // ============================================================================
 // ChainIter - Concatenate Two Slices
@@ -87,28 +86,47 @@ pub fn ChainIter(comptime T: type) type {
             return reducer(results.left, results.right);
         }
 
-        /// Sum all elements using SIMD-optimized parallel reduction.
+        /// Sum all elements using parallel reduction.
         pub fn sum(self: Self) T {
             if (self.first.len == 0 and self.second.len == 0) return 0;
 
-            if (self.first.len == 0) {
-                return simd.parallelSum(T, self.second);
-            }
-
-            if (self.second.len == 0) {
-                return simd.parallelSum(T, self.first);
-            }
-
-            // Fork-join: sum both slices in parallel using SIMD
-            const sumHelper = struct {
+            // Sum helper using parallelReduce
+            const sumSlice = struct {
                 fn do(slice: []const T) T {
-                    return simd.parallelSum(T, slice);
+                    if (slice.len == 0) return 0;
+                    const Context = struct { data: []const T };
+                    return api.parallelReduce(
+                        T,
+                        slice.len,
+                        0,
+                        Context,
+                        .{ .data = slice },
+                        struct {
+                            fn mapFn(ctx: Context, i: usize) T {
+                                return ctx.data[i];
+                            }
+                        }.mapFn,
+                        struct {
+                            fn add(a: T, b: T) T {
+                                return a + b;
+                            }
+                        }.add,
+                    );
                 }
             }.do;
 
+            if (self.first.len == 0) {
+                return sumSlice(self.second);
+            }
+
+            if (self.second.len == 0) {
+                return sumSlice(self.first);
+            }
+
+            // Fork-join: sum both slices in parallel
             const results = api.join(.{
-                .left = .{ sumHelper, self.first },
-                .right = .{ sumHelper, self.second },
+                .left = .{ sumSlice, self.first },
+                .right = .{ sumSlice, self.second },
             });
 
             return results.left + results.right;
@@ -262,21 +280,18 @@ pub fn ZipIter(comptime A: type, comptime B: type) type {
             );
         }
 
-        /// Compute dot product (sum of products) using SIMD optimization.
-        /// Only works when A and B are the same type.
+        /// Compute dot product (sum of products) using parallel reduction.
         pub fn dotProduct(self: Self) A {
-            // Use SIMD-optimized dot product when types match
-            if (A == B) {
-                return simd.parallelDotProduct(A, self.a, self.b);
-            }
-
-            // Fall back to mapReduce for different types
             return self.mapReduce(
                 A,
                 0,
                 struct {
                     fn mul(a: A, b: B) A {
-                        return a * @as(A, @intCast(b));
+                        if (A == B) {
+                            return a * b;
+                        } else {
+                            return a * @as(A, @intCast(b));
+                        }
                     }
                 }.mul,
                 struct {
@@ -443,7 +458,7 @@ pub fn FlattenIter(comptime T: type) type {
             );
         }
 
-        /// Sum all elements using SIMD-optimized parallel reduction.
+        /// Sum all elements using parallel reduction.
         pub fn sum(self: Self) T {
             if (self.slices.len == 0) return 0;
 
@@ -458,8 +473,10 @@ pub fn FlattenIter(comptime T: type) type {
                 ctx,
                 struct {
                     fn mapFn(c: Context, i: usize) T {
-                        // Use SIMD sum for each sub-slice
-                        return simd.sum(T, c.slices[i]);
+                        // Sum each sub-slice sequentially
+                        var s: T = 0;
+                        for (c.slices[i]) |v| s += v;
+                        return s;
                     }
                 }.mapFn,
                 struct {

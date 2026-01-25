@@ -16,7 +16,6 @@
 //!
 //! See also:
 //! - examples/iterators.zig  - Parallel iterator API (find, any/all, minBy, chunks)
-//! - examples/simd.zig       - SIMD operations (vectorized sum, argmin, search)
 //! - examples/sorting.zig    - Parallel PDQSort (sortByKey, sortByCachedKey)
 
 const std = @import("std");

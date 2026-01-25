@@ -365,7 +365,7 @@ pub fn main() !void {
         defer allocator.free(warmup_data);
         for (warmup_data, 0..) |*v, i| v.* = @floatFromInt(i);
         for (0..5) |_| {
-            const sum = blitz.simd_mod.parallelSum(f64, warmup_data);
+            const sum = blitz.iter(f64, warmup_data).sum();
             std.mem.doNotOptimizeAway(sum);
         }
     }
