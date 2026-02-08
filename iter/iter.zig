@@ -20,14 +20,14 @@ const std = @import("std");
 const api = @import("../api.zig");
 
 // Re-export sub-modules
-pub const find = @import("find.zig");
+pub const find = @import("Find.zig");
 pub const predicates = @import("predicates.zig");
 pub const minmax = @import("minmax.zig");
-pub const chunks = @import("chunks.zig");
-pub const enumerate = @import("enumerate.zig");
-pub const mutable = @import("mutable.zig");
-pub const range_mod = @import("range.zig");
-pub const combinators = @import("combinators.zig");
+pub const chunks = @import("Chunks.zig");
+pub const enumerate = @import("Enumerate.zig");
+pub const mutable = @import("Mutable.zig");
+pub const range_mod = @import("Range.zig");
+pub const combinators = @import("Combinators.zig");
 
 // Re-export types
 pub const ChunksIter = chunks.ChunksIter;
@@ -258,5 +258,5 @@ pub fn ParIter(comptime T: type) type {
 // Tests
 test {
     _ = @import("tests.zig");
-    _ = @import("combinators.zig");
+    _ = @import("Combinators.zig");
 }

@@ -379,10 +379,25 @@ fn tryJoinBinaryGeneric(
         return tryJoinBinaryImpl(RA, RB, E, wrapper_a, wrapper_b, task);
     }
 
-    // Get pool or fallback to sequential
+    // Get pool or fallback to sequential (still error-safe: both tasks always run)
     const pool = runtime.getPool() orelse {
-        const result_a = try fn_a();
-        const result_b = try fn_b();
+        var error_a: ?E = null;
+        var result_a: RA = undefined;
+        if (fn_a()) |ra| {
+            result_a = ra;
+        } else |err| {
+            error_a = err;
+        }
+        var error_b: ?E = null;
+        var result_b: RB = undefined;
+        if (fn_b()) |rb| {
+            result_b = rb;
+        } else |err| {
+            error_b = err;
+        }
+        // A's error takes priority (matches parallel implementation)
+        if (error_a) |err| return err;
+        if (error_b) |err| return err;
         return .{ result_a, result_b };
     };
 

@@ -1,0 +1,79 @@
+---
+import type { Props } from '@astrojs/starlight/props';
+import Default from '@astrojs/starlight/components/Head.astro';
+import { ClientRouter } from 'astro:transitions';
+---
+
+<Default {...Astro.props}><slot /></Default>
+<ClientRouter />
+
+<script>
+  // Preserve sidebar scroll position across view transitions.
+  // Starlight's built-in SidebarPersistState saves on visibilitychange/pageHide,
+  // but those don't fire during client-side view transition navigations.
+  function saveSidebarScroll() {
+    const sidebar = document.getElementById('starlight__sidebar');
+    if (sidebar) {
+      sessionStorage.setItem('sl-sidebar-scroll', String(sidebar.scrollTop));
+    }
+  }
+
+  function restoreSidebarScroll() {
+    const sidebar = document.getElementById('starlight__sidebar');
+    const saved = sessionStorage.getItem('sl-sidebar-scroll');
+    if (sidebar && saved) {
+      sidebar.scrollTop = parseInt(saved, 10);
+    }
+  }
+
+  // Save before view transition navigation
+  document.addEventListener('astro:before-preparation', saveSidebarScroll);
+
+  // Restore after new page loads
+  document.addEventListener('astro:page-load', restoreSidebarScroll);
+</script>
+
+<style is:global>
+  /* Cross-dissolve transition - cinematic overlap */
+  @keyframes dissolve-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes dissolve-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  ::view-transition-old(root) {
+    animation: dissolve-out 0.3s ease-in-out;
+  }
+
+  ::view-transition-new(root) {
+    animation: dissolve-in 0.3s ease-in-out;
+  }
+
+  /* Key: both layers visible during transition for true cross-dissolve */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    mix-blend-mode: normal;
+    animation-fill-mode: both;
+  }
+
+  /* Stack them on top of each other */
+  ::view-transition-old(root) {
+    z-index: 1;
+  }
+
+  ::view-transition-new(root) {
+    z-index: 2;
+  }
+</style>

@@ -1,0 +1,228 @@
+---
+title: Introduction
+description: High-performance, lock-free work-stealing parallel runtime for Zig
+slug: v1.0.0-zig0.15.2/1.0.0-zig0.15.2
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+**Blitz** is a high-performance, lock-free work-stealing parallel runtime for Zig, inspired by Rust's Rayon library. It provides fork-join parallelism, parallel iterators, and efficient parallel sorting.
+
+## Why Blitz?
+
+* **Zero-overhead abstractions** - Pay only for what you use
+* **Automatic load balancing** - Work-stealing ensures all cores stay busy
+* **Composable iterators** - Chain operations like Rayon's parallel iterators
+* **No external dependencies** - Pure Zig, works anywhere Zig works
+
+## Quick Example
+
+```zig
+const blitz = @import("blitz");
+
+pub fn main() !void {
+    var data = [_]i64{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+
+    // Parallel sum - automatically parallelized
+    const sum = blitz.iter(i64, &data).sum();
+
+    // Parallel search with early exit
+    const found = blitz.iter(i64, &data).findAny(struct {
+        fn pred(x: i64) bool { return x > 5; }
+    }.pred);
+
+    // Parallel transform in-place
+    blitz.iterMut(i64, &data).mapInPlace(struct {
+        fn double(x: i64) i64 { return x * 2; }
+    }.double);
+
+    // Fork-join for divide-and-conquer
+    const result = blitz.join(.{
+        .left = .{ computeLeft, left_data },
+        .right = .{ computeRight, right_data },
+    });
+}
+```
+
+## Performance
+
+Blitz achieves significant speedups over Rust's Rayon on equivalent benchmarks:
+
+| Operation | Blitz | Rayon | Speedup |
+|-----------|-------|-------|---------|
+| `join()` fork-join (depth 20) | 0.54 ms | 0.71 ms | **1.31x** |
+| `iter().sum()` (100M i64) | 3.1 ms | 8.2 ms | **2.6x** |
+| `sortAsc()` (10M i64) | 89 ms | 119 ms | **1.34x** |
+
+*Benchmarks on Apple M2 Pro, 10 cores*
+
+## Core Features
+
+<CardGrid>
+  <Card title="Parallel Iterators" icon="rocket">
+    Rayon-style composable iterators: `sum()`, `min()`, `max()`, `findAny()`, `any()`, `all()`, `reduce()`, and more. Automatic parallelization with early-exit support.
+  </Card>
+
+  <Card title="Fork-Join" icon="puzzle">
+    Efficient divide-and-conquer with `join()`. Supports heterogeneous return types and up to 8 parallel tasks. Perfect for recursive algorithms.
+  </Card>
+
+  <Card title="Work Stealing" icon="random">
+    Lock-free Chase-Lev deque with Rayon's sleep/wake protocol. Optimal load balancing with minimal contention and smart thread sleeping.
+  </Card>
+
+  <Card title="Parallel Sorting" icon="bars-descending">
+    Pattern-defeating quicksort (PDQSort) with automatic parallelization. 10x faster than `std.mem.sort` on large arrays.
+  </Card>
+</CardGrid>
+
+## APIs at a Glance
+
+### Iterator API (Recommended)
+
+The iterator API provides the most ergonomic way to parallelize data processing:
+
+```zig
+const data: []const i64 = &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+
+// Aggregations
+const sum = blitz.iter(i64, data).sum();           // 55
+const min = blitz.iter(i64, data).min();           // ?i64 = 1
+const max = blitz.iter(i64, data).max();           // ?i64 = 10
+
+// Search with early exit
+const found = blitz.iter(i64, data).findAny(isNegative);   // Fast, any match
+const first = blitz.iter(i64, data).findFirst(isNegative); // Deterministic
+
+// Predicates (short-circuit)
+const hasNeg = blitz.iter(i64, data).any(isNegative);  // Stops on first match
+const allPos = blitz.iter(i64, data).all(isPositive);  // Stops on first fail
+
+// Mutation
+blitz.iterMut(i64, &data).mapInPlace(double);  // Transform in-place
+blitz.iterMut(i64, &data).fill(0);             // Parallel memset
+
+// Custom reduction
+const product = blitz.iter(i64, data).reduce(1, multiply);
+```
+
+### Fork-Join API
+
+For divide-and-conquer algorithms and independent parallel tasks:
+
+```zig
+// Two parallel tasks with different return types
+const result = blitz.join(.{
+    .count = .{ countItems, items },      // Returns usize
+    .total = .{ sumValues, values },      // Returns i64
+});
+// Access: result.count, result.total
+
+// Recursive parallel fibonacci
+fn parallelFib(n: u64) u64 {
+    if (n < 20) return fibSequential(n);  // Sequential threshold
+
+    const r = blitz.join(.{
+        .a = .{ parallelFib, n - 1 },
+        .b = .{ parallelFib, n - 2 },
+    });
+    return r.a + r.b;
+}
+```
+
+### Sorting API
+
+High-performance parallel PDQSort:
+
+```zig
+var numbers = [_]i64{ 5, 2, 8, 1, 9, 3, 7, 4, 6 };
+
+blitz.sortAsc(i64, &numbers);           // Ascending
+blitz.sortDesc(i64, &numbers);          // Descending
+blitz.sort(i64, &numbers, lessThanFn);  // Custom comparator
+
+// Sort structs by key
+blitz.sortByKey(Person, u32, &people, struct {
+    fn key(p: Person) u32 { return p.age; }
+}.key);
+```
+
+### Low-Level API
+
+For fine-grained control over parallelism:
+
+```zig
+// Parallel for with context
+blitz.parallelFor(n, Context, ctx, bodyFn);
+blitz.parallelForWithGrain(n, Context, ctx, bodyFn, grain_size);
+
+// Parallel map-reduce
+const result = blitz.parallelReduce(T, n, identity, Context, ctx, mapFn, combineFn);
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      User Code                               │
+├─────────────────────────────────────────────────────────────┤
+│  iter().sum()  │  join(.{...})  │  sortAsc()  │  parallelFor │
+├─────────────────────────────────────────────────────────────┤
+│                    Work-Stealing Runtime                     │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
+│  │Worker 0 │  │Worker 1 │  │Worker 2 │  │Worker N │        │
+│  │┌───────┐│  │┌───────┐│  │┌───────┐│  │┌───────┐│        │
+│  ││ Deque ││  ││ Deque ││  ││ Deque ││  ││ Deque ││        │
+│  │└───────┘│  │└───────┘│  │└───────┘│  │└───────┘│        │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘        │
+│       │            │            │            │              │
+│       └────────────┴─────┬──────┴────────────┘              │
+│                          │                                   │
+│              ┌───────────┴───────────┐                      │
+│              │   Sleep/Wake Manager   │                      │
+│              │   (JEC Protocol)       │                      │
+│              └───────────────────────┘                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## When to Use Blitz
+
+| Use Case | Recommendation |
+|----------|----------------|
+| Data processing (sum, filter, transform) | `blitz.iter()` / `blitz.iterMut()` |
+| Recursive divide-and-conquer | `blitz.join()` |
+| Sorting large arrays | `blitz.sortAsc()` / `blitz.sort()` |
+| Fine-grained parallel loops | `blitz.parallelFor()` |
+| Map-reduce patterns | `blitz.parallelReduce()` |
+
+## When NOT to Use Blitz
+
+* **Small data (\<1000 elements)** - Overhead exceeds benefit
+* **I/O-bound workloads** - Blitz is optimized for CPU-bound work
+* **Shared mutable state** - Use atomic operations or avoid parallelism
+
+## Next Steps
+
+<CardGrid>
+  <LinkCard title="Installation" href="/getting-started/installation/" description="Add Blitz to your Zig project" />
+
+  <LinkCard title="Quick Start" href="/getting-started/quick-start/" description="Get running in 5 minutes" />
+
+  <LinkCard title="Iterators Guide" href="/usage/iterators/" description="Learn the recommended API" />
+
+  <LinkCard title="API Reference" href="/api/core-api/" description="Complete function reference" />
+
+  <LinkCard title="Cookbook" href="/cookbook/" description="10 real-world recipes with complete code" />
+
+  <LinkCard title="Choosing the Right API" href="/guides/choosing-api/" description="Decision guide for which API to use" />
+
+  <LinkCard title="Performance Tuning" href="/guides/performance-tuning/" description="Get the most out of your hardware" />
+
+  <LinkCard title="Migration Guide" href="/guides/migration/" description="Convert sequential code to parallel" />
+</CardGrid>
+
+## Requirements
+
+* **Zig 0.15.0** or later
+* **POSIX** (Linux, macOS) or **Windows**
+* No external dependencies

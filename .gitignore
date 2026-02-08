@@ -1,6 +1,20 @@
 # Proto
 .prototools
 
+# Node.js / Bun
+node_modules/
+.npm/
+.pnpm-store/
+bun.lockb
+
+# Astro / Starlight docs
+docs/dist/
+docs/.astro/
+docs/node_modules/
+
+# Old docs backup (migrated to Starlight)
+docs-old/
+
 # Zig
 zig-out/
 zig-cache/

@@ -8,13 +8,13 @@
 //! Other ops modules import this to access the shared state.
 
 const std = @import("std");
-pub const pool_mod = @import("../pool.zig");
+pub const pool_mod = @import("../Pool.zig");
 pub const Job = pool_mod.Job;
 pub const Worker = pool_mod.Worker;
 pub const Task = pool_mod.Task;
 pub const ThreadPool = pool_mod.ThreadPool;
 pub const ThreadPoolConfig = pool_mod.ThreadPoolConfig;
-pub const Future = @import("../future.zig").Future;
+pub const Future = @import("../Future.zig").Future;
 
 /// Default grain size - minimum work per task.
 /// Below this, we don't parallelize to avoid overhead.
@@ -62,17 +62,29 @@ var cached_num_workers: std.atomic.Value(u32) = std.atomic.Value(u32).init(1);
 /// When set, we're already inside a pool.call() and can use fork/join directly.
 pub threadlocal var current_task: ?*Task = null;
 
-/// Initialize the global thread pool.
+/// Initialize the global thread pool with default configuration.
+///
+/// Must be called before using any parallel operations. Without this,
+/// all parallel operations execute sequentially as a fallback.
+///
+/// Returns error.AlreadyInitialized if called more than once.
+/// Call deinit() first if you need to re-initialize with different settings.
 pub fn init() !void {
     return initWithConfig(.{});
 }
 
 /// Initialize with custom configuration.
+///
+/// Must be called before using any parallel operations. Without this,
+/// all parallel operations execute sequentially as a fallback.
+///
+/// Returns error.AlreadyInitialized if called more than once.
+/// Call deinit() first if you need to re-initialize with different settings.
 pub fn initWithConfig(config: ThreadPoolConfig) !void {
     pool_mutex.lock();
     defer pool_mutex.unlock();
 
-    if (global_pool != null) return;
+    if (global_pool != null) return error.AlreadyInitialized;
 
     pool_allocator = std.heap.c_allocator;
     const pool = try pool_allocator.create(ThreadPool);
@@ -85,6 +97,10 @@ pub fn initWithConfig(config: ThreadPoolConfig) !void {
 }
 
 /// Shutdown the global thread pool.
+///
+/// All worker threads are joined and resources freed.
+/// After this call, parallel operations will execute sequentially
+/// until init() is called again.
 pub fn deinit() void {
     pool_mutex.lock();
     defer pool_mutex.unlock();
@@ -104,7 +120,7 @@ pub inline fn isInitialized() bool {
     return pool_initialized.load(.acquire);
 }
 
-/// Get the number of worker threads.
+/// Get the number of worker threads (1 if pool not initialized).
 pub inline fn numWorkers() u32 {
     return cached_num_workers.load(.monotonic);
 }
@@ -113,6 +129,7 @@ pub inline fn numWorkers() u32 {
 pub const PoolStats = struct { executed: u64, stolen: u64 };
 
 /// Get pool stats (executed, stolen) for debugging.
+/// Acquires the pool mutex; avoid calling in hot paths.
 pub fn getStats() PoolStats {
     pool_mutex.lock();
     defer pool_mutex.unlock();
@@ -125,6 +142,7 @@ pub fn getStats() PoolStats {
 }
 
 /// Reset pool stats.
+/// Acquires the pool mutex; avoid calling in hot paths.
 pub fn resetStats() void {
     pool_mutex.lock();
     defer pool_mutex.unlock();
@@ -134,28 +152,16 @@ pub fn resetStats() void {
     }
 }
 
-/// Get the global pool, auto-initializing if needed.
+/// Get the global pool if initialized, or null.
+///
+/// Returns null if init() has not been called. Parallel operations
+/// that receive null fall back to sequential execution.
 pub fn getPool() ?*ThreadPool {
-    if (pool_initialized.load(.acquire)) {
-        return global_pool;
-    }
-
+    // Must go through the mutex to prevent a TOCTOU race with deinit().
+    // The pool_initialized flag is still useful for the common isInitialized()
+    // check in hot paths (where we don't need the pointer).
     pool_mutex.lock();
     defer pool_mutex.unlock();
 
-    if (global_pool) |pool| {
-        return pool;
-    }
-
-    // Auto-initialize
-    pool_allocator = std.heap.c_allocator;
-    const pool = pool_allocator.create(ThreadPool) catch return null;
-    pool.* = ThreadPool.init(pool_allocator);
-    pool.start(.{}) catch return null;
-    global_pool = pool;
-
-    cached_num_workers.store(@intCast(pool.numWorkers()), .release);
-    pool_initialized.store(true, .release);
-
-    return pool;
+    return global_pool;
 }

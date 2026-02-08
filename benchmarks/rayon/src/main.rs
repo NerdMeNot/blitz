@@ -99,6 +99,9 @@ fn main() {
         }
     }
 
+    // Snapshot resource usage after warmup to measure only benchmark portion
+    let (_, nvcsw_before, nivcsw_before) = get_resource_usage();
+
     let mut first = true;
     let mut emit = |key: &str, value: f64| {
         if !first { print!(",\n"); }
@@ -299,12 +302,12 @@ fn main() {
         }) as f64 / 1_000_000.0);
     }
 
-    // Resource usage
+    // Resource usage (delta: benchmark portion only, excludes startup/warmup)
     {
-        let (peak_kb, nvcsw, nivcsw) = get_resource_usage();
-        emit("peak_memory_kb", peak_kb as f64);
-        emit("voluntary_ctx_switches", nvcsw as f64);
-        emit("involuntary_ctx_switches", nivcsw as f64);
+        let (peak_kb, nvcsw_after, nivcsw_after) = get_resource_usage();
+        emit("peak_memory_kb", peak_kb as f64); // Peak is cumulative, not delta
+        emit("voluntary_ctx_switches", (nvcsw_after - nvcsw_before) as f64);
+        emit("involuntary_ctx_switches", (nivcsw_after - nivcsw_before) as f64);
     }
 
     println!("\n}}");

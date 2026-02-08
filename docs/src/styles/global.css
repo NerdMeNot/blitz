@@ -1,0 +1,89 @@
+@layer base, starlight, theme, components, utilities;
+
+@import "@astrojs/starlight-tailwind";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Zig orange accent theme */
+@theme {
+  --color-accent-200: #fde68a;
+  --color-accent-600: #f7a41d;
+  --color-accent-900: #92400e;
+  --color-accent-950: #451a03;
+
+  --color-gray-100: #f4f4f5;
+  --color-gray-200: #e4e4e7;
+  --color-gray-300: #d4d4d8;
+  --color-gray-400: #a1a1aa;
+  --color-gray-500: #71717a;
+  --color-gray-700: #3f3f46;
+  --color-gray-800: #27272a;
+  --color-gray-900: #18181b;
+}
+
+/* Smooth scrolling for anchor links */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Smooth theme transitions */
+  *, *::before, *::after {
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+  }
+}
+
+@layer components {
+  /* Dark text on orange active sidebar link for contrast */
+  a[aria-current='page'] {
+    color: var(--color-gray-900) !important;
+  }
+
+  /* Sidebar link hover */
+  nav.sidebar a, .sidebar-content a {
+    transition: color 0.15s ease, background-color 0.15s ease;
+  }
+
+  /* Card hover effect */
+  .card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  /* TOC link transitions */
+  starlight-toc a {
+    transition: color 0.15s ease;
+  }
+
+  /* Content link underline animation */
+  .sl-markdown-content a:not([class]) {
+    text-decoration: none;
+    background-image: linear-gradient(currentColor, currentColor);
+    background-position: 0% 100%;
+    background-repeat: no-repeat;
+    background-size: 0% 1px;
+    transition: background-size 0.2s ease;
+  }
+  .sl-markdown-content a:not([class]):hover {
+    background-size: 100% 1px;
+  }
+
+  /* Code block copy button */
+  .expressive-code button {
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  .expressive-code button:hover {
+    transform: scale(1.05);
+  }
+
+  /* Sidebar group expand/collapse */
+  details summary {
+    transition: color 0.15s ease;
+  }
+  details[open] > summary {
+    color: var(--sl-color-accent);
+  }
+}

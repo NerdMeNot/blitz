@@ -4,8 +4,8 @@
 //! Not intended for public use.
 
 pub const threshold = @import("threshold.zig");
-pub const splitter = @import("splitter.zig");
-pub const rng = @import("rng.zig");
+pub const splitter = @import("Splitter.zig");
+pub const rng = @import("Rng.zig");
 
 // Re-export commonly used types
 pub const OpType = threshold.OpType;

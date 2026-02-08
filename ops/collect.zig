@@ -9,7 +9,7 @@
 const std = @import("std");
 const runtime = @import("runtime.zig");
 const parallel_for = @import("parallel_for.zig");
-const sync = @import("../sync.zig");
+const sync = @import("../Sync.zig");
 pub const SyncPtr = sync.SyncPtr;
 pub const computeOffsetsInto = sync.computeOffsetsInto;
 pub const capAndOffsets = sync.capAndOffsets;

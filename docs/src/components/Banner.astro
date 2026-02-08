@@ -1,0 +1,6 @@
+---
+// Override to suppress starlight-versions' stale-content banner.
+// The versioned docs ARE the latest release — no warning needed.
+import Default from '@astrojs/starlight/components/Banner.astro';
+---
+<Default><slot /></Default>

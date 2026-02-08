@@ -1,262 +1,123 @@
 # Blitz Benchmarks
 
-Performance comparison between Blitz and Rayon, the gold standard for parallel runtimes.
+Performance comparison between Blitz and [Rayon](https://github.com/rayon-rs/rayon).
 
-## A Note on Rayon
+## Standing on Rayon's Shoulders
 
-[Rayon](https://github.com/rayon-rs/rayon) has been the gold standard for parallel iterators
-and work-stealing runtimes since 2015. It powers parallel processing in countless Rust
-applications and has influenced parallel runtime design across languages.
+Rayon has been the gold standard for parallel iterators and work-stealing runtimes since 2015.
+It powers parallel processing in countless Rust applications and has shaped how an entire
+generation of developers thinks about fork-join parallelism.
 
-Blitz is inspired by Rayon's excellent design and aims to bring similar capabilities to Zig.
-We benchmark against Rayon not to claim superiority, but to validate that our implementation
-achieves competitive performance.
+Blitz wouldn't exist without Rayon. Its JEC sleep protocol, its approach to parallel iterators,
+its use of Chase-Lev deques, its PDQSort integration — we studied and learned from all of it.
+Where Blitz differs, it's because Zig's comptime and value semantics open up paths that weren't
+available in Rust, not because we found flaws in Rayon's design.
+
+We benchmark against Rayon to keep ourselves honest, not to claim superiority. Rayon is a
+mature, battle-tested library with years of production use. Blitz is new. These numbers are
+a snapshot in time on one machine — your mileage will vary.
+
+## Test Platform
+
+- **Machine**: MacBook Pro (Apple M3 Pro, 11 cores, 18 GB RAM)
+- **OS**: macOS 26.2 (arm64)
+- **Zig**: 0.15.2
+- **Rust**: 1.92.0
+- **Workers**: 10 threads (both frameworks)
+- **Warmup**: 5 iterations discarded
+- **Measured**: 10 iterations averaged
 
 ## Running Benchmarks
 
 ```bash
-./benchmarks/compare_bench.sh
+zig build compare
 ```
 
 This builds and runs both Blitz and Rayon benchmarks with identical configurations.
 
-## System Configuration
-
-- **CPU**: Apple M1 Pro (10 cores)
-- **Workers**: 10 threads
-- **Warmup**: 5 iterations
-- **Benchmark**: 10 iterations
-- **Zig**: 0.15.2
-- **Rust**: 1.75.0 (for Rayon)
-
-## Results Summary
+## Results
 
 ```
 ┌──────────────────────────┬────────────────┬────────────────┬──────────────────┐
 │ Benchmark                │          Blitz │          Rayon │ Difference       │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ Fork-Join (depth=10)     │        5.70 ns │       22.92 ns │ +75.13% faster   │
-│ Fork-Join (depth=15)     │        1.61 ns │        1.80 ns │ +10.56% faster   │
-│ Fork-Join (depth=20)     │        0.59 ns │        0.59 ns │ ~same            │
+│ Fork-Join (depth=10)     │        5.16 ns │       20.07 ns │ +74.3% faster    │
+│ Fork-Join (depth=15)     │        1.31 ns │        1.70 ns │ +22.9% faster    │
+│ Fork-Join (depth=20)     │        0.76 ns │        0.65 ns │ -16.9% slower    │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ fib(35) parallel         │        3.58 ms │        4.55 ms │ +21.32% faster   │
-│ fib(40) parallel         │       33.60 ms │       51.48 ms │ +34.73% faster   │
-│ fib(35) sequential       │       24.85 ms │       31.46 ms │ +21.01% faster   │
-│ fib(40) sequential       │      278.28 ms │      348.94 ms │ +20.25% faster   │
+│ fib(35) parallel         │        4.02 ms │        4.67 ms │ +13.9% faster    │
+│ fib(35) sequential       │       25.61 ms │       31.00 ms │ +17.4% faster    │
+│ fib(40) parallel         │       38.89 ms │       52.37 ms │ +25.7% faster    │
+│ fib(40) sequential       │      277.93 ms │      355.71 ms │ +21.9% faster    │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ Parallel sum (10M)       │        0.78 ms │        1.13 ms │ +30.97% faster   │
-│ Sequential sum (10M)     │        7.63 ms │        7.65 ms │ ~same            │
+│ Parallel sum (10M)       │        1.62 ms │        1.49 ms │  -8.7% slower    │
+│ Sequential sum (10M)     │        7.89 ms │        7.41 ms │  -6.5% slower    │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ Sort 1M (random)         │        3.12 ms │        3.33 ms │ +6.31% faster    │
-│ Sort 1M (sorted)         │        0.23 ms │        0.42 ms │ +45.24% faster   │
-│ Sort 1M (reverse)        │        0.36 ms │        0.55 ms │ +34.55% faster   │
-│ Sort 1M (equal)          │        0.23 ms │        0.42 ms │ +45.24% faster   │
+│ Sort 1M (random)         │        3.68 ms │        3.99 ms │  +7.8% faster    │
+│ Sort 1M (sorted)         │        0.25 ms │        0.45 ms │ +44.4% faster    │
+│ Sort 1M (reverse)        │        0.37 ms │        0.60 ms │ +38.3% faster    │
+│ Sort 1M (equal)          │        0.27 ms │        0.47 ms │ +42.6% faster    │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ find (early exit)        │        0.0 µs │       15.59 µs │ +99.00% faster   │
-│ position (early)         │        1.4 µs │       19.43 µs │ +92.79% faster   │
-│ position (middle)        │        3.5 µs │       20.71 µs │ +83.10% faster   │
+│ find (early exit)        │          ~ 0 µs │       18.14 µs │ n/a              │
+│ position (early)         │        1.30 µs │       14.12 µs │ +90.8% faster    │
+│ position (middle)        │        1.90 µs │       15.85 µs │ +88.0% faster    │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ any (early exit)         │        0.0 µs │       15.90 µs │ +99.00% faster   │
-│ any (full scan)          │      750.9 µs │      818.88 µs │ +8.30% faster    │
-│ all (pass)               │      746.5 µs │      861.98 µs │ +13.40% faster   │
+│ any (early exit)         │        0.10 µs │       16.14 µs │ +99.4% faster    │
+│ any (full scan)          │      828.90 µs │     1314.52 µs │ +36.9% faster    │
+│ all (pass)               │      918.20 µs │     1300.70 µs │ +29.4% faster    │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ minByKey (10M)           │      799.3 µs │     1357.17 µs │ +41.10% faster   │
-│ maxByKey (10M)           │      765.5 µs │     1210.08 µs │ +36.74% faster   │
+│ minByKey (10M)           │      867.60 µs │     1937.97 µs │ +55.2% faster    │
+│ maxByKey (10M)           │      964.00 µs │     1378.01 µs │ +30.0% faster    │
 ├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ chunks(1000) + sum       │        0.69 ms │        0.79 ms │ +12.66% faster   │
-│ enumerate + forEach      │        0.02 ms │        0.06 ms │ +66.67% faster   │
-│ chain(2×5M) + sum        │        0.80 ms │        0.96 ms │ +16.67% faster   │
-│ zip + dot product        │        0.76 ms │        0.83 ms │ +8.43% faster    │
-│ flatten(1000×10k) + sum  │        0.76 ms │        1.05 ms │ +27.62% faster   │
+│ chunks(1000) + sum       │        0.78 ms │        1.05 ms │ +25.7% faster    │
+│ enumerate + forEach      │        0.02 ms │        0.07 ms │ +71.4% faster    │
+│ chain(2x5M) + sum        │        0.86 ms │        0.98 ms │ +12.2% faster    │
+│ zip + dot product        │        0.85 ms │        0.90 ms │  +5.6% faster    │
+│ flatten(1000x10k) + sum  │        0.76 ms │        1.17 ms │ +35.0% faster    │
+├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
+│ Peak Memory              │       208.0 MB │       233.2 MB │ +10.8% less      │
+│ Involuntary Ctx Sw       │         30,025 │         34,236 │ +12.3% fewer     │
 └──────────────────────────┴────────────────┴────────────────┴──────────────────┘
 
-Legend: + = Blitz faster, - = Rayon faster
+  Blitz wins: 24 / 27    Rayon wins: 3 / 27
+
+  Legend: + = Blitz faster/less, - = Rayon faster/less
 ```
 
-## Resource Utilization
+## Where Rayon Wins
 
-Blitz uses fewer system resources than Rayon:
+Rayon outperforms Blitz on parallel and sequential sum (by ~7-9%). At very high fork depths
+(depth=20, 2M+ forks), Rayon's mature scheduling also edges ahead. These are areas where
+we have more to learn.
 
-```
-┌──────────────────────────┬────────────────┬────────────────┬──────────────────┐
-│ Metric                   │          Blitz │          Rayon │ Difference       │
-├──────────────────────────┼────────────────┼────────────────┼──────────────────┤
-│ Peak Memory              │       207.9 MB │       233.5 MB │ +10.96% less     │
-│ Involuntary Ctx Switches │         21,874 │         30,172 │ +27.50% fewer    │
-└──────────────────────────┴────────────────┴────────────────┴──────────────────┘
-```
+## What Helps Blitz
 
-**Peak Memory**: Blitz uses ~11% less memory than Rayon for the same workloads.
+Most of Blitz's advantages come from Zig's language properties rather than algorithmic
+breakthroughs:
 
-## Performance Summary
+- **Comptime specialization** — function pointers resolved at compile time eliminate virtual
+  dispatch overhead that Rayon pays through trait objects
+- **Value semantics** — no heap allocation for closures or iterator adapters
+- **Cache-line isolation** — deque `top`/`bottom` on separate cache lines, padded worker
+  state to prevent false sharing
+- **Packed atomics** — single u64 holds sleeping threads, inactive threads, and JEC counter
 
-```
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                         BLITZ vs RAYON SUMMARY                               ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  Fork-Join Overhead:        10-75% faster (Rayon-style JEC protocol)         ║
-║  Compute-Bound (Fibonacci): 20-35% faster                                    ║
-║  Parallel Sum:              31% faster (SIMD reduction)                      ║
-║  Sort (patterns):           34-45% faster (SIMD sorted detection)            ║
-║  Sort (random):             6% faster                                        ║
-║  Early Exit Operations:     83-99% faster (efficient cancellation)           ║
-║  Reductions (min/max/all):  8-41% faster                                     ║
-║  Iterator Combinators:      8-67% faster                                     ║
-║  Memory Usage:              11% less                                         ║
-║                                                                              ║
-║  OVERALL: Blitz wins 24-25 of 26 benchmarks consistently                     ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-```
+The fork-join protocol, the Chase-Lev deque, the PDQSort integration, the sleep/wake
+coordination — these are all Rayon's ideas, adapted for Zig.
 
-## Detailed Analysis
+## Caveats
 
-### Fork-Join Overhead (10-75% faster)
-
-Blitz's Rayon-style JEC protocol provides efficient sleep/wake coordination:
-
-| Depth | Total Forks | Blitz | Rayon | Improvement |
-|-------|-------------|-------|-------|-------------|
-| 10 | 2,047 | 5.70 ns | 22.92 ns | **75% faster** |
-| 15 | 65,535 | 1.61 ns | 1.80 ns | **11% faster** |
-| 20 | 2,097,151 | 0.59 ns | 0.59 ns | ~same |
-
-**Why Blitz wins**: JEC (Jobs Event Counter) protocol with progressive sleep (32 yields → announce sleepy → sleep) minimizes both latency and CPU usage.
-
-### Parallel Fibonacci (20-35% faster)
-
-Compute-bound recursive workload testing work-stealing efficiency:
-
-| N | Blitz | Rayon | Improvement |
-|---|-------|-------|-------------|
-| 35 | 3.58 ms | 4.55 ms | **21% faster** |
-| 40 | 33.60 ms | 51.48 ms | **35% faster** |
-
-**Why Blitz wins**: Lower fork-join overhead compounds across millions of recursive calls.
-
-### Parallel Sum (31% faster)
-
-SIMD-optimized parallel reduction:
-
-| Mode | Blitz | Rayon | Improvement |
-|------|-------|-------|-------------|
-| Parallel | 0.78 ms | 1.13 ms | **31% faster** |
-
-**Analysis**: Blitz uses SIMD-accelerated chunked reduction with efficient work distribution.
-
-### PDQSort (Pattern-Defeating Quicksort)
-
-Both Blitz and Rayon implement PDQSort with BlockQuicksort partitioning:
-
-| Pattern | Blitz | Rayon | Improvement |
-|---------|-------|-------|-------------|
-| Random | 3.12 ms | 3.33 ms | **6% faster** |
-| **Sorted** | **0.23 ms** | 0.42 ms | **45% faster** |
-| **Reverse** | **0.36 ms** | 0.55 ms | **35% faster** |
-| **Equal** | **0.23 ms** | 0.42 ms | **45% faster** |
-
-**Why Blitz wins on patterns**: SIMD-optimized sorted sequence detection. Instead of checking one pair at a time, Blitz checks 4 pairs simultaneously using vector comparisons.
-
-### Early Exit Operations (83-99% faster)
-
-Operations that can terminate early benefit from Blitz's efficient cancellation:
-
-| Operation | Blitz | Rayon | Improvement |
-|-----------|-------|-------|-------------|
-| find (early) | 0.0 µs | 15.59 µs | **99% faster** |
-| position (early) | 1.4 µs | 19.43 µs | **93% faster** |
-| position (middle) | 3.5 µs | 20.71 µs | **83% faster** |
-
-### Reduction Operations (8-41% faster)
-
-| Operation | Blitz | Rayon | Improvement |
-|-----------|-------|-------|-------------|
-| minByKey 10M | 799.3 µs | 1357.17 µs | **41% faster** |
-| maxByKey 10M | 765.5 µs | 1210.08 µs | **37% faster** |
-| all 10M | 746.5 µs | 861.98 µs | **13% faster** |
-| any (full scan) | 750.9 µs | 818.88 µs | **8% faster** |
-
-### Iterator Combinators (8-67% faster)
-
-| Operation | Blitz | Rayon | Improvement |
-|-----------|-------|-------|-------------|
-| enumerate + forEach | 0.02 ms | 0.06 ms | **67% faster** |
-| flatten 1000x10K | 0.76 ms | 1.05 ms | **28% faster** |
-| chain 2×5M | 0.80 ms | 0.96 ms | **17% faster** |
-| chunks + sum | 0.69 ms | 0.79 ms | **13% faster** |
-| zip 10M | 0.76 ms | 0.83 ms | **8% faster** |
-
-## Key Optimizations
-
-### 1. Rayon-Style JEC Protocol
-```zig
-// Jobs Event Counter: even=sleepy, odd=active
-// Workers check JEC snapshot before sleeping to detect new work
-fn incrementJecIfSleepy(self: *AtomicCounters) u64 {
-    while (true) {
-        const old = self.loadSeqCst();
-        if ((extractJec(old) & 1) != 0) return old;  // Already active
-        const new = old +% ONE_JEC;  // Toggle to odd
-        if (self.value.cmpxchgWeak(old, new, .seq_cst, .monotonic) == null) {
-            return old;
-        }
-    }
-}
-```
-
-### 2. SIMD Sorted Detection
-```zig
-// Scalar (Rayon): check one pair at a time
-while (i < len and v[i] >= v[i-1]) i += 1;
-
-// SIMD (Blitz): check 4 pairs at once
-const a: @Vector(4, f64) = v[i..][0..4].*;
-const b: @Vector(4, f64) = v[i+1..][0..4].*;
-if (@reduce(.And, a <= b)) // all 4 pairs sorted
-```
-
-### 3. Cache-Line Isolation
-- Deque `top` and `bottom` on separate cache lines
-- WorkerSleepState padded to prevent false sharing
-- Prevents cache invalidation between owner and thieves
-
-### 4. Comptime Specialization
-- Zig's comptime eliminates virtual dispatch
-- Function pointers resolved at compile time
-
-### 5. Lemire's Fast Bounded Random
-- O(1) victim selection for work stealing
-- No modulo operation or rejection sampling
-
-### 6. Packed AtomicCounters
-```
-AtomicCounters (u64):
-├── Bits 0-15:  sleeping_threads
-├── Bits 16-31: inactive_threads
-└── Bits 32-63: JEC (Jobs Event Counter)
-```
-Single atomic load/store for all sleep coordination state.
-
-## Algorithm Choice: Why PDQSort?
-
-| Algorithm | Time | Space | Parallel First Partition | Best For |
-|-----------|------|-------|--------------------------|----------|
-| **PDQ Sort** | O(n log n) | O(log n) | No | General purpose, in-place |
-| Radix Sort | O(n × k) | O(n) | Yes | Fixed-size integers only |
-| Sample Sort | O(n log n) | O(n) | Yes | Many cores, large arrays |
-
-PDQSort is the right choice for a general-purpose library:
-- Works for any comparable type
-- In-place (minimal memory overhead)
-- Excellent pattern detection
-- Same algorithm used by Rust's standard library
+- Single machine, single OS — results on Linux/x86 may differ significantly
+- Microbenchmarks, not real workloads — production performance depends on many factors
+- Both frameworks are configured identically (10 workers, same warmup/iteration counts)
+- Run-to-run variance is typically 5-15% on these benchmarks
+- Rayon is mature and battle-tested; Blitz is new and less proven in production
 
 ## Acknowledgments
 
-- [Rayon](https://github.com/rayon-rs/rayon) - The gold standard for parallel runtimes
-- [PDQSort](https://github.com/orlp/pdqsort) - Orson Peters' pattern-defeating quicksort
-- [BlockQuicksort](https://arxiv.org/abs/1604.06697) - Branchless block-based partitioning
-- [Chase-Lev Deque](https://www.dre.vanderbilt.edu/~schmidt/PDF/work-stealing-dequeue.pdf) - Lock-free work stealing
-- [Crossbeam](https://github.com/crossbeam-rs/crossbeam) - Lock-free data structures
-- [Lemire's Fast Range](https://arxiv.org/abs/1805.10941) - Nearly divisionless random
+- [Rayon](https://github.com/rayon-rs/rayon) — the library that taught us how parallel runtimes should work
+- [PDQSort](https://github.com/orlp/pdqsort) — Orson Peters' pattern-defeating quicksort
+- [BlockQuicksort](https://arxiv.org/abs/1604.06697) — branchless block-based partitioning
+- [Chase-Lev Deque](https://www.dre.vanderbilt.edu/~schmidt/PDF/work-stealing-dequeue.pdf) — lock-free work stealing
+- [Crossbeam](https://github.com/crossbeam-rs/crossbeam) — lock-free data structures that inspired our deque
+- [Lemire's Fast Range](https://arxiv.org/abs/1805.10941) — nearly divisionless random for victim selection

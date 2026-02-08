@@ -370,6 +370,9 @@ pub fn main() !void {
         }
     }
 
+    // Snapshot resource usage after warmup to measure only benchmark portion
+    const ru_before = getResourceUsage();
+
     var json = JsonWriter{};
     json.begin();
 
@@ -523,15 +526,15 @@ pub fn main() !void {
         json.value("{d:.2}", .{@as(f64, @floatFromInt(benchmark(flattenSumBench, .{}))) / 1_000_000.0});
     }
 
-    // Resource usage
+    // Resource usage (delta: benchmark portion only, excludes startup/warmup)
     {
-        const ru = getResourceUsage();
+        const ru_after = getResourceUsage();
         json.key("peak_memory_kb");
-        json.value("{d}", .{ru.peak_memory_kb});
+        json.value("{d}", .{ru_after.peak_memory_kb}); // Peak is cumulative, not delta
         json.key("voluntary_ctx_switches");
-        json.value("{d}", .{ru.voluntary_ctx_switches});
+        json.value("{d}", .{ru_after.voluntary_ctx_switches - ru_before.voluntary_ctx_switches});
         json.key("involuntary_ctx_switches");
-        json.value("{d}", .{ru.involuntary_ctx_switches});
+        json.value("{d}", .{ru_after.involuntary_ctx_switches - ru_before.involuntary_ctx_switches});
     }
 
     json.end();

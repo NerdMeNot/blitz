@@ -60,3 +60,35 @@ zig fmt .
 ## Commit Guidelines
 
 **Important:** Do not add Claude, Anthropic, or any AI assistant as a co-author in commit messages. Commits should only attribute human contributors.
+
+## blitz-io Integration
+
+Blitz is designed to complement [blitz-io](../blitz-io/) - an async I/O runtime. Together they form a complete async system like Tokio + Rayon in Rust:
+
+- **Blitz**: CPU-bound parallelism (fork-join, parallel iterators, work-stealing)
+- **blitz-io**: I/O-bound async (networking, file I/O, timers)
+
+### Integration Points
+
+1. **Job Injection** - blitz-io submits CPU work to Blitz via `ThreadPool.injectJob()`
+2. **Result Delivery** - Blitz workers signal completion back to blitz-io tasks
+3. **No Cross-Blocking** - Blitz workers never block on I/O; blitz-io tasks never do heavy CPU work
+
+### Key APIs for Integration
+
+```zig
+// Submit work from outside the pool
+pool.injectJob(job) // Existing - works but allocates InjectedJob node
+
+// Check for external work
+pool.hasInjectedJobs() // Existing - used in sleep protocol
+pool.popInjectedJob()  // Existing - called by idle workers
+```
+
+### Potential Enhancements for blitz-io
+
+| Enhancement | Description |
+|-------------|-------------|
+| Callback on completion | Allow injected jobs to specify a completion callback |
+| External waker support | Let blitz-io provide a custom waker for result notification |
+| Oneshot channel | Built-in single-value result delivery primitive |

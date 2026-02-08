@@ -9,7 +9,7 @@ const std = @import("std");
 const runtime = @import("runtime.zig");
 const Task = runtime.Task;
 const Future = runtime.Future;
-const splitter_mod = @import("../internal/splitter.zig");
+const splitter_mod = @import("../internal/Splitter.zig");
 const LengthSplitter = splitter_mod.LengthSplitter;
 
 // ============================================================================

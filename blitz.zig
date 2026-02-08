@@ -22,7 +22,7 @@
 //! ```zig
 //! const blitz = @import("blitz");
 //!
-//! // Initialize (optional - auto-inits on first use)
+//! // Initialize (required before any parallel operations)
 //! try blitz.init();
 //! defer blitz.deinit();
 //!
@@ -53,19 +53,19 @@
 
 const std = @import("std");
 
-// Core types - all from pool.zig
-const pool = @import("pool.zig");
+// Core types - all from Pool.zig
+const pool = @import("Pool.zig");
 pub const Job = pool.Job;
 pub const Worker = pool.Worker;
 pub const Task = pool.Task;
 pub const ThreadPool = pool.ThreadPool;
 pub const ThreadPoolConfig = pool.ThreadPoolConfig;
 
-pub const OnceLatch = @import("latch.zig").OnceLatch;
-pub const CountLatch = @import("latch.zig").CountLatch;
-pub const SpinWait = @import("latch.zig").SpinWait;
+pub const OnceLatch = @import("Latch.zig").OnceLatch;
+pub const CountLatch = @import("Latch.zig").CountLatch;
+pub const SpinWait = @import("Latch.zig").SpinWait;
 
-pub const Future = @import("future.zig").Future;
+pub const Future = @import("Future.zig").Future;
 
 // API functions
 const api = @import("api.zig");
@@ -115,7 +115,7 @@ pub const computeOffsetsInto = api.computeOffsetsInto;
 pub const capAndOffsets = api.capAndOffsets;
 
 // Also export from sync module directly
-const sync = @import("sync.zig");
+const sync = @import("Sync.zig");
 
 // Threshold module for intelligent parallelism decisions
 pub const threshold = @import("internal/threshold.zig");
@@ -140,7 +140,7 @@ pub const ParIterMut = iter_mod.ParIterMut;
 pub const RangeIter = iter_mod.RangeIter;
 
 // Scope-based parallelism (spawn arbitrary tasks)
-pub const scope_mod = @import("scope.zig");
+pub const scope_mod = @import("Scope.zig");
 pub const scope = scope_mod.scope;
 pub const scopeWithContext = scope_mod.scopeWithContext;
 pub const Scope = scope_mod.Scope;
@@ -198,33 +198,31 @@ pub fn parallelFill(comptime T: type, data: []T, value: T) void {
 }
 
 // Adaptive splitting (Phase 2)
-pub const splitter_mod = @import("internal/splitter.zig");
+pub const splitter_mod = @import("internal/Splitter.zig");
 pub const Splitter = splitter_mod.Splitter;
 pub const LengthSplitter = splitter_mod.LengthSplitter;
 
 // Lock-free primitives (Phase 3)
-pub const Deque = @import("deque.zig").Deque;
-pub const XorShift64Star = @import("internal/rng.zig").XorShift64Star;
+pub const Deque = @import("Deque.zig").Deque;
+pub const XorShift64Star = @import("internal/Rng.zig").XorShift64Star;
 
 // ============================================================================
 // Tests
 // ============================================================================
 
 test "blitz - all modules compile" {
-    _ = @import("pool.zig");
-    _ = @import("latch.zig");
-    _ = @import("future.zig");
+    _ = @import("Pool.zig");
+    _ = @import("Latch.zig");
+    _ = @import("Future.zig");
     _ = @import("api.zig");
-    _ = @import("sync.zig");
-    _ = @import("scope.zig");
+    _ = @import("Sync.zig");
+    _ = @import("Scope.zig");
     _ = @import("algorithms.zig");
-    _ = @import("deque.zig");
+    _ = @import("Deque.zig");
     // Modular imports
     _ = @import("internal/internal.zig");
     _ = @import("iter/iter.zig");
     _ = @import("sort/sort.zig");
-    // Stress tests (run separately: zig build test -Doptimize=ReleaseFast)
-    // _ = @import("stress_tests.zig");
 }
 
 test "blitz - basic parallel for" {

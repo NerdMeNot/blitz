@@ -1,0 +1,5 @@
+---
+// Serve Zig autodocs by redirecting to the static HTML file.
+// This page exists to bypass Starlight's catch-all dynamic route.
+return Astro.redirect('/_autodocs/index.html');
+---
