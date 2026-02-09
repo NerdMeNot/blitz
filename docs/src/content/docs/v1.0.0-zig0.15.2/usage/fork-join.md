@@ -1,7 +1,6 @@
 ---
 title: Fork-Join
 description: Execute multiple tasks potentially in parallel and collect results
-slug: v1.0.0-zig0.15.2/usage/fork-join
 ---
 
 Execute multiple tasks potentially in parallel and collect results. This is the foundation of divide-and-conquer parallelism.
@@ -35,7 +34,9 @@ pub fn main() void {
 }
 ```
 
-No explicit initialization required - Blitz auto-initializes on first use.
+:::note
+Remember to call `blitz.init()` before using parallel operations. See [Initialization](/usage/initialization/).
+:::
 
 ## How It Works
 
@@ -246,26 +247,26 @@ Threshold guidelines:
 
 | Algorithm | Recommended Threshold |
 |-----------|----------------------|
-| Fibonacci | n \< 20 |
-| Merge sort | len \< 1024 |
-| Tree operations | nodes \< 100-1000 |
+| Fibonacci | n < 20 |
+| Merge sort | len < 1024 |
+| Tree operations | nodes < 100-1000 |
 | General | Switch when overhead > work |
 
 ## When to Use Fork-Join
 
 ### Good For
 
-* **Recursive divide-and-conquer**: sort, fibonacci, tree traversal
-* **Two independent computations**: results don't depend on each other
-* **Heterogeneous tasks**: different operations, different types
-* **Nested parallelism**: recursive algorithms that spawn subtasks
+- **Recursive divide-and-conquer**: sort, fibonacci, tree traversal
+- **Two independent computations**: results don't depend on each other
+- **Heterogeneous tasks**: different operations, different types
+- **Nested parallelism**: recursive algorithms that spawn subtasks
 
 ### Not Ideal For
 
-* **Many small independent tasks**: use `parallelFor` instead
-* **Sequential dependencies**: one task needs another's result
-* **Very unbalanced workloads**: one task much larger than others
-* **Single elements**: overhead exceeds benefit
+- **Many small independent tasks**: use `parallelFor` instead
+- **Sequential dependencies**: one task needs another's result
+- **Very unbalanced workloads**: one task much larger than others
+- **Single elements**: overhead exceeds benefit
 
 ## Fork-Join vs Other APIs
 
@@ -352,9 +353,9 @@ const final = merge(r2.a, r2.b);
 
 ## Related APIs
 
-* **[Error Handling](/v1.0.0-zig0.15.2/usage/error-handling/)** — Use `tryJoin()` when your tasks return error unions. All tasks complete before errors propagate.
-* **[Scope & Broadcast](/v1.0.0-zig0.15.2/usage/scope-broadcast/)** — Use `scope()` for dynamic task spawning (up to 64 tasks) and `broadcast()` to run on all workers.
-* **[Choosing the Right API](/v1.0.0-zig0.15.2/guides/choosing-api/)** — Decision guide for when to use `join()` vs `parallelFor` vs iterators.
+- **[Error Handling](/usage/error-handling/)** — Use `tryJoin()` when your tasks return error unions. All tasks complete before errors propagate.
+- **[Scope & Broadcast](/usage/scope-broadcast/)** — Use `scope()` for dynamic task spawning (up to 64 tasks) and `broadcast()` to run on all workers.
+- **[Choosing the Right API](/guides/choosing-api/)** — Decision guide for when to use `join()` vs `parallelFor` vs iterators.
 
 ## Best Practices
 

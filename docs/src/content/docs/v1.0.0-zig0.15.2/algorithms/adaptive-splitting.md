@@ -1,7 +1,6 @@
 ---
 title: Adaptive Splitting
 description: Intelligent work division for optimal parallelism.
-slug: v1.0.0-zig0.15.2/algorithms/adaptive-splitting
 ---
 
 ## The Problem
@@ -298,17 +297,17 @@ fn parallelForImpl(
 
 ### When to Increase Threshold
 
-* Memory-bound operations
-* High fork/join overhead
-* Small element size
-* Simple operations (low compute per element)
+- Memory-bound operations
+- High fork/join overhead
+- Small element size
+- Simple operations (low compute per element)
 
 ### When to Decrease Threshold
 
-* Compute-bound operations
-* Large element size
-* Complex operations (high compute per element)
-* Many cores available
+- Compute-bound operations
+- Large element size
+- Complex operations (high compute per element)
+- Many cores available
 
 ### Profiling Approach
 

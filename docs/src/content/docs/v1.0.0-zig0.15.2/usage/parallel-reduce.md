@@ -1,7 +1,6 @@
 ---
 title: Parallel Reduce
 description: Map-reduce pattern for aggregating data in parallel
-slug: v1.0.0-zig0.15.2/usage/parallel-reduce
 ---
 
 Map-reduce pattern for aggregating data in parallel.
@@ -70,11 +69,11 @@ Step 2: Parallel combine (tree reduction)
 | Operation | Identity | Why |
 |-----------|----------|-----|
 | Sum | 0 | x + 0 = x |
-| Product | 1 | x \* 1 = x |
+| Product | 1 | x * 1 = x |
 | Min | maxInt | min(x, maxInt) = x |
 | Max | minInt | max(x, minInt) = x |
 | And | true | x && true = x |
-| Or | false | x || false = x |
+| Or | false | x \|\| false = x |
 
 ## Common Patterns
 
@@ -181,15 +180,13 @@ combine(combine(a, b), c) == combine(a, combine(b, c))
 ```
 
 **Valid:**
-
-* Addition: (1+2)+3 = 1+(2+3) = 6
-* Multiplication: (2*3)*4 = 2*(3*4) = 24
-* Min/Max: max(max(1,2),3) = max(1,max(2,3)) = 3
+- Addition: (1+2)+3 = 1+(2+3) = 6
+- Multiplication: (2*3)*4 = 2*(3*4) = 24
+- Min/Max: max(max(1,2),3) = max(1,max(2,3)) = 3
 
 **Invalid:**
-
-* Subtraction: (5-3)-1 ≠ 5-(3-1)
-* Division: (8/4)/2 ≠ 8/(4/2)
+- Subtraction: (5-3)-1 ≠ 5-(3-1)
+- Division: (8/4)/2 ≠ 8/(4/2)
 
 ## Performance: Parallel vs Sequential
 
@@ -206,4 +203,4 @@ if (data.len < 10_000) {
 }
 ```
 
-Use `blitz.internal.shouldParallelize(.sum, data.len)` for automatic decision.
+Use `data.len >= blitz.DEFAULT_GRAIN_SIZE` as a simple threshold for the parallel/sequential decision.

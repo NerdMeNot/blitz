@@ -1,7 +1,6 @@
 ---
 title: Parallel File Scanning
 description: Scan files and directories in parallel with error handling using tryForEach
-slug: v1.0.0-zig0.15.2/cookbook/file-scanning
 ---
 
 Scan files and directories in parallel with graceful error handling.

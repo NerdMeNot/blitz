@@ -1,7 +1,6 @@
 ---
 title: Parallel Sorting
 description: High-performance parallel PDQSort (Pattern-Defeating Quicksort)
-slug: v1.0.0-zig0.15.2/usage/sorting
 ---
 
 High-performance parallel PDQSort (Pattern-Defeating Quicksort).
@@ -84,10 +83,9 @@ try blitz.sortByCachedKey(
 ```
 
 **When to use cached key:**
-
-* Key function is expensive (> 100ns)
-* Sorting large arrays (> 10K elements)
-* Key computation can be parallelized
+- Key function is expensive (> 100ns)
+- Sorting large arrays (> 10K elements)
+- Key computation can be parallelized
 
 ## Custom Comparator Examples
 
@@ -153,7 +151,7 @@ PDQSort (Pattern-Defeating Quicksort) combines:
 | Technique | When Used | Benefit |
 |-----------|-----------|---------|
 | Quicksort | Large arrays | O(n log n) average |
-| Insertion sort | \< 24 elements | Low overhead |
+| Insertion sort | < 24 elements | Low overhead |
 | Heapsort | Bad pivot patterns | O(n log n) guaranteed |
 | Block partition | Large partitions | Cache efficiency |
 | Pattern breaking | Detected patterns | Prevents O(n²) |
@@ -173,16 +171,15 @@ Array: [........................1M elements........................]
                     Recursive fork-join
 ```
 
-* Fork at each partition (if large enough)
-* Sequential threshold: 8,192 elements
-* Work stealing balances uneven partitions
+- Fork at each partition (if large enough)
+- Sequential threshold: 8,192 elements
+- Work stealing balances uneven partitions
 
 ## Stability
 
 **Important**: Blitz sort is **not stable**. Equal elements may be reordered.
 
 For stable sorting needs:
-
 ```zig
 // Use standard library stable sort
 std.mem.sort(T, data, {}, lessThanFn);
@@ -190,14 +187,14 @@ std.mem.sort(T, data, {}, lessThanFn);
 
 ## Memory Usage
 
-* **In-place**: Minimal extra memory (~log n stack depth)
-* **sortByCachedKey**: Allocates O(n) for key array
+- **In-place**: Minimal extra memory (~log n stack depth)
+- **sortByCachedKey**: Allocates O(n) for key array
 
 ## When to Use Parallel Sort
 
 | Data Size | Recommendation |
 |-----------|----------------|
-| \< 1,000 | Sequential (overhead too high) |
+| < 1,000 | Sequential (overhead too high) |
 | 1K - 10K | May parallelize (depends on comparator cost) |
 | > 10K | Parallel (significant speedup) |
 

@@ -1,17 +1,15 @@
 ---
 title: PDQSort Algorithm
 description: Pattern-Defeating Quicksort - a hybrid sorting algorithm.
-slug: v1.0.0-zig0.15.2/algorithms/pdqsort
 ---
 
 ## Overview
 
 PDQSort (Pattern-Defeating Quicksort) is a hybrid sorting algorithm that combines:
-
-* **Quicksort** for average-case O(n log n)
-* **Insertion sort** for small arrays
-* **Heapsort** fallback for O(n log n) worst-case guarantee
-* **Pattern detection** to exploit already-sorted data
+- **Quicksort** for average-case O(n log n)
+- **Insertion sort** for small arrays
+- **Heapsort** fallback for O(n log n) worst-case guarantee
+- **Pattern detection** to exploit already-sorted data
 
 It was designed by Orson Peters and is used in Rust's standard library.
 
@@ -20,7 +18,6 @@ It was designed by Orson Peters and is used in Rust's standard library.
 ### The Problem with Quicksort
 
 Standard quicksort has issues:
-
 1. **O(n^2) worst case** on sorted/reverse-sorted input
 2. **Poor pivot selection** leads to unbalanced partitions
 3. **No pattern exploitation** - treats sorted data same as random
@@ -106,9 +103,8 @@ pub fn insertTail(comptime T: type, v: []T, comptime is_less: fn (T, T) bool) vo
 ```
 
 **Why shift instead of swap?**
-
-* Swap: 3 memory operations per position (read tmp, read other, write both)
-* Shift: 1 read + 1 write per position, final write at end
+- Swap: 3 memory operations per position (read tmp, read other, write both)
+- Shift: 1 read + 1 write per position, final write at end
 
 ### 2. Pivot Selection (Median-of-Medians)
 
@@ -199,7 +195,6 @@ pub fn partitionInBlocks(comptime T: type, v: []T, pivot: *const T, comptime is_
 ```
 
 **Why 4x unrolling?**
-
 ```
 Without unrolling:
     Compare → Branch → Store → Compare → Branch → Store
@@ -212,7 +207,6 @@ With 4x unrolling:
 ```
 
 **Why cyclic permutation?**
-
 ```
 Pair swaps (traditional):
     tmp = A; A = B; B = tmp;  // 3 ops per pair
@@ -342,17 +336,15 @@ All equal            0.24 ms     0.77 ms     69% faster
 ```
 
 **Why Blitz excels on patterns:**
-
-* SIMD sorted detection checks 4 pairs per iteration
-* Early bailout via `partialInsertionSort` for nearly-sorted
-* Efficient `partitionEqual` for many duplicates
+- SIMD sorted detection checks 4 pairs per iteration
+- Early bailout via `partialInsertionSort` for nearly-sorted
+- Efficient `partitionEqual` for many duplicates
 
 **Why random is competitive:**
-
-* 4x loop unrolling in block tracing
-* Pivot value caching (`const piv = pivot.*`)
-* Same BlockQuicksort algorithm as Rayon
-* Both use identical O(n log n) approach
+- 4x loop unrolling in block tracing
+- Pivot value caching (`const piv = pivot.*`)
+- Same BlockQuicksort algorithm as Rayon
+- Both use identical O(n log n) approach
 
 ## Complexity
 
@@ -366,10 +358,10 @@ The worst-case is guaranteed by the heapsort fallback.
 
 ## Implementation Files
 
-* `sort/pdqsort.zig` - Main PDQSort implementation
-* `sort/helpers.zig` - Insertion sort, heapsort, pivot selection
-* `sort/simd_check.zig` - SIMD sorted detection
-* `sort/stablesort.zig` - Stable merge sort variant
+- `sort/pdqsort.zig` - Main PDQSort implementation
+- `sort/helpers.zig` - Insertion sort, heapsort, pivot selection
+- `sort/simd_check.zig` - SIMD sorted detection
+- `sort/stablesort.zig` - Stable merge sort variant
 
 ## References
 

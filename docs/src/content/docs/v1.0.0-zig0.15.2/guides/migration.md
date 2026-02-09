@@ -1,7 +1,6 @@
 ---
 title: Migration from Sequential
 description: Step-by-step patterns for converting sequential Zig code to parallel Blitz code
-slug: v1.0.0-zig0.15.2/guides/migration
 ---
 
 Step-by-step patterns for converting sequential Zig code to parallel equivalents using Blitz.
@@ -46,7 +45,6 @@ blitz.parallelFor(data.len, Context, .{ .data = data }, struct {
 ```
 
 **Key changes**:
-
 1. Define a `Context` struct holding all data the loop body needs
 2. The body receives chunk boundaries `(start, end)`, not a single index
 3. Loop over the chunk `[start..end)` inside the body
@@ -394,7 +392,7 @@ fn parallelMergeSort(data: []i64) void {
 1. **Add `blitz.init()` / `defer blitz.deinit()`** to your main function
 2. **Identify hot loops** using profiling (not guessing)
 3. **Check data size** -- parallelism only helps above ~10K elements
-4. **Choose the right API** (see [Choosing the Right API](/v1.0.0-zig0.15.2/guides/choosing-api/))
+4. **Choose the right API** (see [Choosing the Right API](/guides/choosing-api/))
 5. **Define a Context struct** holding all data the parallel body needs
 6. **Test correctness** -- parallel code should produce identical results
 7. **Benchmark** -- measure actual speedup, do not assume

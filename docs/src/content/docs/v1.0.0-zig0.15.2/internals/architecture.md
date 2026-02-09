@@ -1,8 +1,6 @@
 ---
 title: Architecture Overview
-description: Internal architecture of Blitz, including component interactions,
-  data structures, and key design decisions.
-slug: v1.0.0-zig0.15.2/internals/architecture
+description: Internal architecture of Blitz, including component interactions, data structures, and key design decisions.
 ---
 
 ## System Architecture
@@ -25,7 +23,7 @@ slug: v1.0.0-zig0.15.2/internals/architecture
                                     |
                                     v
 +-----------------------------------------------------------------------------+
-|                        FORK-JOIN LAYER (future.zig)                          |
+|                        FORK-JOIN LAYER (Future.zig)                          |
 |  - Stack-allocated Future(Input, Output) for fork-join                       |
 |  - Embedded OnceLatch for completion signaling                               |
 |  - Hybrid join: latch-first for stolen, pop-first for local                  |
@@ -34,7 +32,7 @@ slug: v1.0.0-zig0.15.2/internals/architecture
                                     |
                                     v
 +-----------------------------------------------------------------------------+
-|                      SCHEDULER (pool.zig)                                    |
+|                      SCHEDULER (Pool.zig)                                    |
 |  - ThreadPool with Rayon-style JEC (Jobs Event Counter) protocol             |
 |  - AtomicCounters: packed u64 with sleeping/inactive/JEC counters            |
 |  - CoreLatch: 4-state protocol (UNSET->SLEEPY->SLEEPING->SET)                |
@@ -45,16 +43,16 @@ slug: v1.0.0-zig0.15.2/internals/architecture
                                     v
 +-----------------------------------------------------------------------------+
 |                        LOCK-FREE PRIMITIVES                                  |
-|  deque.zig   - Chase-Lev work-stealing deque (wait-free push/pop)           |
-|  latch.zig   - 4-state OnceLatch, CountLatch, SpinWait                      |
-|  job.zig     - Minimal Job struct (8 bytes: handler pointer)                |
-|  sync.zig    - SyncPtr for lock-free parallel writes                        |
+|  Deque.zig   - Chase-Lev work-stealing deque (wait-free push/pop)           |
+|  Latch.zig   - 4-state OnceLatch, CountLatch, SpinWait                     |
+|  Pool.zig    - Job struct (8 bytes: handler pointer) + ThreadPool          |
+|  Sync.zig    - SyncPtr for lock-free parallel writes                       |
 +-----------------------------------------------------------------------------+
 ```
 
 ## Component Details
 
-### ThreadPool (pool.zig)
+### ThreadPool (Pool.zig)
 
 The thread pool manages worker threads and coordinates work distribution using Rayon-style sleep protocol.
 
@@ -101,7 +99,7 @@ ThreadPool
         |   (bottom--, CAS if last)        |
    ```
 
-### Worker (pool.zig)
+### Worker (Pool.zig)
 
 Each worker thread maintains local state for efficient work distribution.
 
@@ -158,7 +156,7 @@ Worker (per thread)
                     +------------------+
 ```
 
-### Future (future.zig)
+### Future (Future.zig)
 
 Stack-allocated futures enable zero-allocation fork-join parallelism.
 
@@ -203,7 +201,7 @@ Total size: ~32-64 bytes (on stack)
    +-------------------------------------------------------------+
 ```
 
-### Chase-Lev Deque (deque.zig)
+### Chase-Lev Deque (Deque.zig)
 
 Lock-free double-ended queue optimized for work-stealing.
 
@@ -222,11 +220,11 @@ Deque(T)
 | Operation | Ordering | Rationale |
 |-----------|----------|-----------|
 | push (write bottom) | release | Make item visible before index |
-| pop (read/write bottom) | seq\_cst | Synchronize with steal |
-| pop (CAS top) | seq\_cst | Race with thieves |
+| pop (read/write bottom) | seq_cst | Synchronize with steal |
+| pop (CAS top) | seq_cst | Race with thieves |
 | steal (read top) | acquire | See owner's pushes |
 | steal (read bottom) | acquire | See owner's pops |
-| steal (CAS top) | seq\_cst | Race with owner and other thieves |
+| steal (CAS top) | seq_cst | Race with owner and other thieves |
 
 **Steal with Backoff**:
 
@@ -248,7 +246,7 @@ pub fn stealLoop(self: *Self) ?T {
 }
 ```
 
-### OnceLatch (latch.zig)
+### OnceLatch (Latch.zig)
 
 4-state latch that prevents missed wakes.
 
@@ -372,7 +370,6 @@ With SLEEPY state (safe):
 ### 1. Rayon-Style JEC Protocol
 
 Prevents missed wakes through Jobs Event Counter toggling:
-
 ```zig
 // When posting work
 fn newJobs(self: *Sleep, ...) void {
@@ -403,10 +400,9 @@ fn parallelRecurse(...) void {
 ```
 
 **Benefits**:
-
-* Zero heap allocation for fork-join
-* Cache-friendly (future near call site)
-* Automatic cleanup on function return
+- Zero heap allocation for fork-join
+- Cache-friendly (future near call site)
+- Automatic cleanup on function return
 
 ### 3. Hybrid Join Strategy
 
@@ -468,10 +464,9 @@ pub fn parallelFor(
 ```
 
 **Benefits**:
-
-* No virtual dispatch
-* Full inlining possible
-* Type-specific optimizations
+- No virtual dispatch
+- Full inlining possible
+- Type-specific optimizations
 
 ## Performance Characteristics
 
@@ -512,9 +507,8 @@ Deque memory layout (prevents false sharing):
 ```
 
 This ensures:
-
-* Owner (bottom) and thieves (top) don't cause cache invalidation
-* Buffer metadata rarely changes after initialization
+- Owner (bottom) and thieves (top) don't cause cache invalidation
+- Buffer metadata rarely changes after initialization
 
 ### Future Size Optimization
 

@@ -1,8 +1,6 @@
 ---
 title: Scope & Broadcast
-description: Scope-based parallelism, fire-and-forget spawn, parallel index
-  ranges, and broadcast to all workers
-slug: v1.0.0-zig0.15.2/usage/scope-broadcast
+description: Scope-based parallelism, fire-and-forget spawn, parallel index ranges, and broadcast to all workers
 ---
 
 Scope-based parallelism for spawning arbitrary tasks that must all complete before the scope exits, plus utilities for fire-and-forget background work and broadcasting to all worker threads.

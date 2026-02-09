@@ -3,14 +3,13 @@ title: Core API Reference
 description: Comprehensive documentation for all Blitz APIs
 sidebar:
   order: 1
-slug: v1.0.0-zig0.15.2/api/core-api
 ---
 
 This document provides comprehensive documentation for all Blitz APIs, including function signatures, parameters, return types, examples, limitations, and best practices.
 
 ## Initialization
 
-Blitz uses a global thread pool that auto-initializes on first use. You can also initialize explicitly for custom configuration.
+Blitz uses a global thread pool that must be initialized before use.
 
 ### `init() !void`
 
@@ -21,14 +20,9 @@ try blitz.init();
 defer blitz.deinit();
 ```
 
-**Errors**: Returns error if thread creation fails.
+**Errors**: Returns `error.AlreadyInitialized` if called twice, or thread creation errors.
 
-**Notes**:
-
-* Safe to call multiple times (no-op if already initialized)
-* Auto-called on first API use if not explicitly initialized
-
-### `initWithConfig(config: Config) !void`
+### `initWithConfig(config: ThreadPoolConfig) !void`
 
 Initialize with custom configuration.
 
@@ -53,10 +47,9 @@ blitz.deinit();
 ```
 
 **Notes**:
-
-* Waits for all pending work to complete
-* Safe to call multiple times
-* Must be called before program exit to avoid resource leaks
+- Waits for all pending work to complete
+- Safe to call multiple times
+- Must be called before program exit to avoid resource leaks
 
 ### `isInitialized() bool`
 
@@ -68,7 +61,7 @@ if (!blitz.isInitialized()) {
 }
 ```
 
-### `numWorkers() usize`
+### `numWorkers() u32`
 
 Get the number of worker threads.
 
@@ -77,7 +70,7 @@ const workers = blitz.numWorkers();
 std.debug.print("Using {} workers\n", .{workers});
 ```
 
-***
+---
 
 ## Iterator API
 
@@ -117,7 +110,7 @@ const sum = blitz.range(0, 100).sum(i64, identity);
 blitz.range(0, 1000).forEach(processIndex);
 ```
 
-***
+---
 
 ### Aggregation Methods
 
@@ -166,11 +159,10 @@ const product = blitz.iter(i64, &data).reduce(1, struct {
 ```
 
 **Requirements**:
+- `combine` must be **associative**: `combine(a, combine(b, c)) == combine(combine(a, b), c)`
+- `identity` must be the **identity element**: `combine(identity, x) == x`
 
-* `combine` must be **associative**: `combine(a, combine(b, c)) == combine(combine(a, b), c)`
-* `identity` must be the **identity element**: `combine(identity, x) == x`
-
-***
+---
 
 ### Search Methods
 
@@ -214,7 +206,7 @@ Check if **all** elements match the predicate. Supports early exit.
 const all_positive = blitz.iter(i64, &data).all(isPositive);
 ```
 
-***
+---
 
 ### Mutation Methods
 
@@ -242,7 +234,7 @@ blitz.iterMut(i64, &data).fill(0);
 // data is now [0, 0, 0, 0, 0]
 ```
 
-***
+---
 
 ## Fork-Join API
 
@@ -261,13 +253,12 @@ const result = blitz.join(.{
 ```
 
 **Parameters**: Anonymous struct where each field is either:
-
-* A function pointer (no arguments)
-* A tuple `.{ function, arg1, arg2, ... }` (up to 10 arguments)
+- A function pointer (no arguments)
+- A tuple `.{ function, arg1, arg2, ... }` (up to 10 arguments)
 
 **Returns**: Struct with same field names, containing each task's return value.
 
-***
+---
 
 ## Parallel Algorithms
 
@@ -321,7 +312,7 @@ blitz.sortByKey(Person, u32, &people, struct {
 
 Two-phase sort: compute keys in parallel, then sort by cached keys.
 
-***
+---
 
 ## Low-Level API
 
@@ -356,12 +347,11 @@ Execute a function in parallel over a range with explicit grain size control.
 Use this when you need fine-grained control over parallelization granularity. For most cases, prefer `parallelFor()` which auto-tunes based on data size.
 
 **Parameters:**
-
-* `n`: Range size `[0, n)`
-* `Context`: Type holding shared data
-* `ctx`: Context instance
-* `body`: `fn(Context, start: usize, end: usize) void`
-* `grain`: Minimum elements per chunk
+- `n`: Range size `[0, n)`
+- `Context`: Type holding shared data
+- `ctx`: Context instance
+- `body`: `fn(Context, start: usize, end: usize) void`
+- `grain`: Minimum elements per chunk
 
 ```zig
 // Process with small grain for expensive operations
@@ -399,7 +389,7 @@ blitz.parallelForWithGrain(n, void, {}, struct {
 |----------------|-------------------|
 | Expensive (>1μs/element) | 64-256 |
 | Medium (~100ns/element) | 256-1024 |
-| Cheap (\<10ns/element) | 4096-10000 |
+| Cheap (&lt;10ns/element) | 4096-10000 |
 
 ### `parallelReduce(T, n, identity, Context, ctx, map, combine) T`
 
@@ -408,19 +398,17 @@ Parallel map-reduce with full control over mapping and combining.
 Maps each index to a value using `map(ctx, index)`, then combines all values using the associative `combine(a, b)` function in a divide-and-conquer pattern.
 
 **Parameters:**
-
-* `T`: Result type
-* `n`: Range size `[0, n)`
-* `identity`: Identity value for combine (e.g., 0 for sum, 1 for product)
-* `Context`: Type holding shared data
-* `ctx`: Context instance
-* `map`: `fn(Context, usize) T` - Extract/compute value at index
-* `combine`: `fn(T, T) T` - Associative binary operation
+- `T`: Result type
+- `n`: Range size `[0, n)`
+- `identity`: Identity value for combine (e.g., 0 for sum, 1 for product)
+- `Context`: Type holding shared data
+- `ctx`: Context instance
+- `map`: `fn(Context, usize) T` - Extract/compute value at index
+- `combine`: `fn(T, T) T` - Associative binary operation
 
 **Requirements:**
-
-* `combine` must be **associative**: `combine(a, combine(b, c)) == combine(combine(a, b), c)`
-* `identity` must satisfy: `combine(identity, x) == x`
+- `combine` must be **associative**: `combine(a, combine(b, c)) == combine(combine(a, b), c)`
+- `identity` must satisfy: `combine(identity, x) == x`
 
 ```zig
 // Sum of squares
@@ -509,7 +497,7 @@ const result = blitz.parallelReduceWithGrain(
 );
 ```
 
-***
+---
 
 ## Collection & Scatter API
 
@@ -567,11 +555,11 @@ blitz.parallelScatter(u32, &values, &indices, &output);
 // output[0]=200, output[3]=300, output[5]=100
 ```
 
-***
+---
 
 ## Error-Safe API
 
-All tasks complete before errors propagate. See [Error Handling](/v1.0.0-zig0.15.2/usage/error-handling/) for details.
+All tasks complete before errors propagate. See [Error Handling](/usage/error-handling/) for details.
 
 ### `tryJoin(tasks) E!Result`
 
@@ -611,11 +599,11 @@ const total = try blitz.tryReduce(
 );
 ```
 
-***
+---
 
 ## Scope & Broadcast API
 
-For dynamic task spawning. See [Scope & Broadcast](/v1.0.0-zig0.15.2/usage/scope-broadcast/) for details.
+For dynamic task spawning. See [Scope & Broadcast](/usage/scope-broadcast/) for details.
 
 ### `scope(func) void`
 
@@ -653,7 +641,7 @@ const stats = blitz.getStats();
 std.debug.print("Executed: {}, Stolen: {}\n", .{ stats.executed, stats.stolen });
 ```
 
-***
+---
 
 ## Configuration
 
@@ -675,17 +663,19 @@ Get the current grain size.
 
 #### `defaultGrainSize() usize`
 
-Get the default grain size (4096).
+Get the default grain size (65536).
+
+You can also use the constant `blitz.DEFAULT_GRAIN_SIZE` (65536).
 
 **Guidelines**:
 | Operation Cost | Recommended Grain |
 |----------------|-------------------|
-| Trivial (add, compare) | 4096-10000 |
-| Light (simple math) | 1024-4096 |
+| Trivial (add, compare) | 10000-65536 |
+| Light (simple math) | 1024-10000 |
 | Medium (string ops) | 256-1024 |
 | Heavy (I/O, allocation) | 64-256 |
 
-***
+---
 
 ## Thread Safety
 

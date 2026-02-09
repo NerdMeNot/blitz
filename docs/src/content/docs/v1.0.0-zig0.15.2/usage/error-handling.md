@@ -1,7 +1,6 @@
 ---
 title: Error Handling
 description: Error-safe parallel operations with tryJoin, tryForEach, and tryReduce
-slug: v1.0.0-zig0.15.2/usage/error-handling
 ---
 
 Error-safe parallel operations that guarantee all tasks complete before any error propagates. This is critical for safety when parallel tasks reference the caller's stack frame.

@@ -1,17 +1,15 @@
 ---
 title: Early Exit Operations
 description: Parallel search operations that terminate as soon as a result is found.
-slug: v1.0.0-zig0.15.2/algorithms/early-exit-operations
 ---
 
 ## Overview
 
 Many search operations don't need to process all elements:
-
-* **find**: Stop when first match is found
-* **any**: Stop when any element satisfies predicate
-* **all**: Stop when any element fails predicate
-* **position**: Stop when first match is found
+- **find**: Stop when first match is found
+- **any**: Stop when any element satisfies predicate
+- **all**: Stop when any element fails predicate
+- **position**: Stop when first match is found
 
 Blitz implements these with **atomic early termination** that prunes entire subtrees when a result is found, matching Rayon's `consumer.full()` pattern.
 
@@ -224,9 +222,8 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
 ```
 
 **Key difference from `findAny`**:
-
-* `findAny` can exit immediately when ANY match is found
-* `findFirst` must continue processing ranges BEFORE the best match (they might find an earlier one)
+- `findAny` can exit immediately when ANY match is found
+- `findFirst` must continue processing ranges BEFORE the best match (they might find an earlier one)
 
 ### `findLast` - Deterministic
 
@@ -388,9 +385,9 @@ fn customSearch(data: []const MyType) ?MyType {
 
 ## Implementation Files
 
-* `iter/find.zig` - Find operations (findAny, findFirst, findLast, position)
-* `iter/predicates.zig` - Predicate operations (any, all)
-* `api.zig` - `parallelForWithEarlyExit` implementation
+- `iter/find.zig` - Find operations (findAny, findFirst, findLast, position)
+- `iter/predicates.zig` - Predicate operations (any, all)
+- `api.zig` - `parallelForWithEarlyExit` implementation
 
 ## References
 

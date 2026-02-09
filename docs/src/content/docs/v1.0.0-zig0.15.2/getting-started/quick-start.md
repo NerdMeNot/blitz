@@ -1,7 +1,6 @@
 ---
 title: Quick Start
 description: Get parallel execution working in under 5 minutes
-slug: v1.0.0-zig0.15.2/getting-started/quick-start
 ---
 
 Get parallel execution working in under 5 minutes.
@@ -43,7 +42,9 @@ pub fn main() !void {
 }
 ```
 
-No initialization required. Blitz auto-initializes on first use.
+:::caution
+Call `blitz.init()` before using parallel operations, and `blitz.deinit()` at shutdown. Without initialization, operations fall back to **sequential** execution — they still produce correct results, but without any parallelism. See [Initialization](/usage/initialization/) for details.
+:::
 
 ## The Two APIs
 
@@ -384,7 +385,7 @@ fn mergeSort(data: []i32) void {
 
 ## What's Next
 
-* [Basic Concepts](/v1.0.0-zig0.15.2/getting-started/basic-concepts/) - Understand work stealing and fork-join
-* [Iterator API](/v1.0.0-zig0.15.2/usage/iterators/) - Complete iterator reference
-* [Fork-Join](/v1.0.0-zig0.15.2/usage/fork-join/) - Divide and conquer patterns
-* [API Reference](/v1.0.0-zig0.15.2/api/core-api/) - Full API documentation
+- [Basic Concepts](/getting-started/basic-concepts/) - Understand work stealing and fork-join
+- [Iterator API](/usage/iterators/) - Complete iterator reference
+- [Fork-Join](/usage/fork-join/) - Divide and conquer patterns
+- [API Reference](/api/core-api/) - Full API documentation

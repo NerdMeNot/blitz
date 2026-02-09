@@ -1,15 +1,14 @@
 ---
 title: Installation
 description: Add Blitz to your Zig project
-slug: v1.0.0-zig0.15.2/getting-started/installation
 ---
 
 Blitz is a pure Zig library with no external dependencies.
 
 ## Requirements
 
-* Zig 0.15.0 or later
-* POSIX-compatible OS (Linux, macOS) or Windows
+- Zig 0.15.0 or later
+- POSIX-compatible OS (Linux, macOS) or Windows
 
 ## Adding Blitz to Your Project
 
@@ -98,10 +97,11 @@ Then in your `build.zig`:
 
 ```zig
 const blitz_mod = b.addModule("blitz", .{
-    .root_source_file = b.path("deps/blitz/mod.zig"),
+    .root_source_file = b.path("deps/blitz/api.zig"),
     .target = target,
     .optimize = optimize,
 });
+blitz_mod.link_libc = true;
 
 exe.root_module.addImport("blitz", blitz_mod);
 ```
@@ -111,8 +111,12 @@ exe.root_module.addImport("blitz", blitz_mod);
 For quick prototyping, copy the blitz source and import directly:
 
 ```zig
-const blitz = @import("path/to/blitz/mod.zig");
+const blitz = @import("path/to/blitz/api.zig");
 ```
+
+:::note
+Blitz requires libc — make sure to add `link_libc = true` on the module or pass `-lc` when building manually.
+:::
 
 ## Verifying Installation
 
@@ -124,7 +128,6 @@ zig build test
 ```
 
 Expected output:
-
 ```
 All tests passed.
 ```
@@ -142,19 +145,16 @@ zig build compare
 ## Platform Notes
 
 ### macOS (Apple Silicon)
+- Full support with ARM64 optimizations
+- Optimal performance on M1/M2/M3 chips
 
-* Full support with ARM64 optimizations
-* Optimal performance on M1/M2/M3 chips
-
-### Linux (x86\_64)
-
-* Full support with x86\_64 optimizations
-* Works on any modern x86\_64 processor
+### Linux (x86_64)
+- Full support with x86_64 optimizations
+- Works on any modern x86_64 processor
 
 ### Windows
-
-* Supported via Zig's cross-platform std library
-* Uses Windows synchronization primitives internally
+- Supported via Zig's cross-platform std library
+- Uses Windows synchronization primitives internally
 
 ## Optimization Tips
 

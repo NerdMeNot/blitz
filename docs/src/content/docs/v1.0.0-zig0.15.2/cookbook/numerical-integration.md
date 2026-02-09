@@ -1,8 +1,6 @@
 ---
 title: Numerical Integration
-description: Compute definite integrals in parallel using Simpson's rule and the
-  trapezoidal method
-slug: v1.0.0-zig0.15.2/cookbook/numerical-integration
+description: Compute definite integrals in parallel using Simpson's rule and the trapezoidal method
 ---
 
 Compute definite integrals in parallel using classic numerical methods.

@@ -1,7 +1,6 @@
 ---
 title: Data Normalization
 description: Compute statistics and normalize data in parallel using iter, join, and iterMut
-slug: v1.0.0-zig0.15.2/cookbook/data-normalization
 ---
 
 Compute summary statistics and normalize a dataset in parallel using a multi-phase pipeline.
@@ -274,9 +273,9 @@ Data normalization is a two-phase pipeline with a synchronization barrier betwee
 
 **Phase 1 -- Aggregate statistics.** Before normalizing, you need global properties of the dataset (mean, min, max, standard deviation). Blitz provides two approaches:
 
-* **`iter().sum()` / `iter().min()` / `iter().max()`** for single-statistic queries. These are the simplest to use and internally run parallel reductions with early-exit optimization for min/max.
-* **`parallelReduce` with a struct accumulator** for computing multiple statistics in a single pass. By packing `sum` and `sum_sq` into an `Accum` struct, you traverse the data once instead of twice, which is better for cache performance on large datasets.
-* **`join`** to run independent aggregations concurrently. When computing min and max, `join` lets both reductions execute on different workers simultaneously.
+- **`iter().sum()` / `iter().min()` / `iter().max()`** for single-statistic queries. These are the simplest to use and internally run parallel reductions with early-exit optimization for min/max.
+- **`parallelReduce` with a struct accumulator** for computing multiple statistics in a single pass. By packing `sum` and `sum_sq` into an `Accum` struct, you traverse the data once instead of twice, which is better for cache performance on large datasets.
+- **`join`** to run independent aggregations concurrently. When computing min and max, `join` lets both reductions execute on different workers simultaneously.
 
 **Phase 2 -- In-place transformation.** Once statistics are known, `parallelFor` distributes the normalization across workers. Each worker receives a contiguous chunk and applies the same formula `(x - mean) / stddev` to every element. The statistics are passed via the context struct (Zig does not support closures with captured locals). This is purely data-parallel with no inter-worker communication.
 
@@ -305,4 +304,4 @@ Parallel (8T):  14 ms          (6.1x speedup)
 
 Normalization is memory-bandwidth-bound for simple arithmetic (subtract and divide). The parallel speedup plateaus around 6-7x on 8 threads because the memory bus saturates. For more compute-intensive normalizations (e.g., log transforms, quantile normalization), speedups approach the theoretical maximum more closely.
 
-The single-pass `parallelReduce` with struct accumulator is about 30% faster than two separate `iter().sum()` calls because it reads the data once from cache instead of twice. For datasets that fit in L3 cache (\< ~30 MB), the difference is smaller.
+The single-pass `parallelReduce` with struct accumulator is about 30% faster than two separate `iter().sum()` calls because it reads the data once from cache instead of twice. For datasets that fit in L3 cache (< ~30 MB), the difference is smaller.

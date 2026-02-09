@@ -1,7 +1,6 @@
 ---
 title: Work Stealing Algorithm
 description: The core scheduling algorithm that makes Blitz efficient.
-slug: v1.0.0-zig0.15.2/algorithms/work-stealing
 ---
 
 ## Overview
@@ -138,7 +137,7 @@ Central queue:           Work stealing:
 
 ## Implementation Details
 
-### Chase-Lev Deque (from `deque.zig`)
+### Chase-Lev Deque (from `Deque.zig`)
 
 ```zig
 pub fn Deque(comptime T: type) type {
@@ -199,7 +198,7 @@ pub fn Deque(comptime T: type) type {
 pub const StealResult = enum { empty, success, retry };
 ```
 
-### Progressive Sleep (from `pool.zig`)
+### Progressive Sleep (from `Pool.zig`)
 
 Blitz uses Rayon's JEC (Jobs Event Counter) protocol for sleep coordination:
 
@@ -235,7 +234,7 @@ fn idleLoop(self: *Worker, idle_state: *IdleState) void {
 }
 ```
 
-See [Sleep/Wake Protocol](/v1.0.0-zig0.15.2/internals/sleep-wake-protocol/) for details on the JEC protocol.
+See [Sleep/Wake Protocol](/internals/sleep-wake-protocol/) for details on the JEC protocol.
 
 ## Comparison with Other Approaches
 

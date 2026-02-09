@@ -1,8 +1,6 @@
 ---
 title: Performance Tuning
-description: Grain size tuning, profiling, and optimization strategies for Blitz
-  parallel workloads
-slug: v1.0.0-zig0.15.2/guides/performance-tuning
+description: Grain size tuning, profiling, and optimization strategies for Blitz parallel workloads
 ---
 
 Practical guidance for getting the best performance out of Blitz's parallel runtime.
@@ -13,17 +11,17 @@ Parallelism has overhead: forking tasks, work-stealing, and joining results. The
 
 | Data Size | Per-Element Cost | Parallelize? |
 |-----------|-----------------|--------------|
-| \< 1,000 | Any | No -- overhead dominates |
+| < 1,000 | Any | No -- overhead dominates |
 | 1K - 10K | Cheap (add, compare) | Probably not |
 | 1K - 10K | Moderate (sqrt, trig) | Maybe -- benchmark it |
 | 1K - 10K | Expensive (> 1us) | Yes |
 | > 10K | Cheap | Yes |
 | > 100K | Any | Definitely |
 
-Use `blitz.internal.shouldParallelize()` for automatic decisions:
+Use a size-based threshold:
 
 ```zig
-if (blitz.internal.shouldParallelize(.transform, data.len)) {
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     blitz.parallelFor(data.len, ctx_type, ctx, bodyFn);
 } else {
     for (data) |*v| v.* = transform(v.*);
@@ -144,17 +142,15 @@ blitz.parallelFor(n, Context, ctx, struct {
 ```
 
 **Signs of memory-bound behavior**:
-
-* Speedup plateaus at 2-4x regardless of core count
-* Performance varies with array size (cache effects)
-* Same throughput as `@memcpy` for similar data sizes
+- Speedup plateaus at 2-4x regardless of core count
+- Performance varies with array size (cache effects)
+- Same throughput as `@memcpy` for similar data sizes
 
 **Strategies for memory-bound code**:
-
-* Use larger grain sizes to reduce overhead
-* Process data in cache-friendly order (sequential access patterns)
-* Consider whether parallelism is needed at all
-* Combine multiple passes into one (kernel fusion)
+- Use larger grain sizes to reduce overhead
+- Process data in cache-friendly order (sequential access patterns)
+- Consider whether parallelism is needed at all
+- Combine multiple passes into one (kernel fusion)
 
 ## False Sharing
 
@@ -229,9 +225,9 @@ std.debug.print("Tasks stolen:   {d}\n", .{stats.stolen});
 
 **What to look for**:
 
-* **High stolen / executed ratio** (> 30%): Good load balancing, work-stealing is active
-* **Low stolen ratio** (\< 5%): Work is evenly distributed (or grain is too large)
-* **Zero stolen**: Either single-threaded or grain so large that each worker gets one chunk
+- **High stolen / executed ratio** (> 30%): Good load balancing, work-stealing is active
+- **Low stolen ratio** (< 5%): Work is evenly distributed (or grain is too large)
+- **Zero stolen**: Either single-threaded or grain so large that each worker gets one chunk
 
 ## Profiling Tips
 
@@ -285,7 +281,6 @@ Maximum theoretical speedup is bounded by the number of workers. If you see 4x s
 ### 5. Profile with System Tools
 
 On macOS:
-
 ```bash
 # Sample CPU usage during benchmark
 sample <pid> 5 -file output.txt
@@ -295,7 +290,6 @@ xcrun xctrace record --template "Time Profiler" --launch -- ./benchmark
 ```
 
 On Linux:
-
 ```bash
 # perf stat for hardware counters
 perf stat ./benchmark

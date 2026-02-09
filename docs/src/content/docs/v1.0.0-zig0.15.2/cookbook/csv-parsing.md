@@ -1,7 +1,6 @@
 ---
 title: CSV Data Parsing
 description: Parse CSV data in parallel and aggregate numeric results using Blitz
-slug: v1.0.0-zig0.15.2/cookbook/csv-parsing
 ---
 
 ## Problem
@@ -240,13 +239,11 @@ Typical measurements for a 1-million-row CSV file with 10 columns on a 10-core m
 The three-column case benefits doubly: each column is itself parallelized, and the three columns run concurrently. This stacks to produce a higher effective speedup.
 
 **When to use this pattern:**
-
-* CSV files with more than 10,000 rows
-* Per-row parsing involves non-trivial computation (float parsing, string operations)
-* Multiple independent aggregations needed on the same dataset
+- CSV files with more than 10,000 rows
+- Per-row parsing involves non-trivial computation (float parsing, string operations)
+- Multiple independent aggregations needed on the same dataset
 
 **When sequential is fine:**
-
-* Small files (under 1,000 rows)
-* Only need a single pass for one aggregate
-* Parsing is trivial (integer-only data)
+- Small files (under 1,000 rows)
+- Only need a single pass for one aggregate
+- Parsing is trivial (integer-only data)

@@ -1,7 +1,6 @@
 ---
 title: Choosing the Right API
 description: Decision guide for selecting the best Blitz API for your parallel workload
-slug: v1.0.0-zig0.15.2/guides/choosing-api
 ---
 
 Blitz offers several parallel APIs, each optimized for different patterns. This guide helps you pick the right one.
@@ -16,7 +15,7 @@ Blitz offers several parallel APIs, each optimized for different patterns. This 
 | Sum / min / max an array | `iter().sum()` / `.min()` / `.max()` | Total revenue, highest score |
 | Search for an element | `iter().findAny()` | Find first negative value |
 | Check a condition on all elements | `iter().any()` / `.all()` | Any NaN? All positive? |
-| Transform array to new array | `parallelCollect` | Convert i32\[] to f64\[] |
+| Transform array to new array | `parallelCollect` | Convert i32[] to f64[] |
 | Transform array in place | `parallelMapInPlace` or `iterMut().mapInPlace()` | Normalize pixel values |
 | Run 2-8 independent tasks | `join` | Compute stats + histogram |
 | Run 2-64 dynamic tasks | `scope` + `spawn` | Load multiple files |
@@ -183,7 +182,7 @@ Every core API has an error-safe variant:
 | `parallelFor` | `tryForEach` | All chunks complete before error propagates |
 | `parallelReduce` | `tryReduce` | All reductions complete before error propagates |
 
-Use `try*` variants when your parallel body can return a Zig error. See [Error Handling](/v1.0.0-zig0.15.2/usage/error-handling/) for details.
+Use `try*` variants when your parallel body can return a Zig error. See [Error Handling](/usage/error-handling/) for details.
 
 ## Decision Flowchart
 

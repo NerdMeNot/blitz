@@ -1,18 +1,16 @@
 ---
 title: Thread Pool
-description: Rayon-style work-stealing thread pool with sophisticated sleep/wake
-  coordination to minimize both latency and CPU usage.
-slug: v1.0.0-zig0.15.2/internals/thread-pool
+description: Rayon-style work-stealing thread pool with sophisticated sleep/wake coordination to minimize both latency and CPU usage.
 ---
 
 ## Overview
 
 The thread pool is the heart of Blitz's parallelism. Key characteristics:
 
-* **Lock-free work stealing**: Chase-Lev deques with wait-free push/pop
-* **Rayon-style sleep protocol**: Progressive sleep with JEC (Jobs Event Counter)
-* **4-state CoreLatch**: Prevents missed wake signals
-* **Packed AtomicCounters**: Single u64 holds sleeping/inactive/JEC counters
+- **Lock-free work stealing**: Chase-Lev deques with wait-free push/pop
+- **Rayon-style sleep protocol**: Progressive sleep with JEC (Jobs Event Counter)
+- **4-state CoreLatch**: Prevents missed wake signals
+- **Packed AtomicCounters**: Single u64 holds sleeping/inactive/JEC counters
 
 ## Architecture
 
@@ -57,10 +55,9 @@ All sleep coordination state is packed into a single 64-bit atomic value for eff
 ```
 
 **Key relationships**:
-
-* `awake_but_idle = inactive_threads - sleeping_threads`
-* These workers are polling and will find new work naturally
-* Only sleeping workers need explicit wake signals
+- `awake_but_idle = inactive_threads - sleeping_threads`
+- These workers are polling and will find new work naturally
+- Only sleeping workers need explicit wake signals
 
 ```zig
 const AtomicCounters = struct {
@@ -85,9 +82,8 @@ const AtomicCounters = struct {
 The JEC protocol prevents a critical race condition where a worker misses newly posted work while transitioning to sleep.
 
 **JEC States**:
-
-* **Even (LSB = 0)**: "Sleepy" mode - no new work since last sleepy announcement
-* **Odd (LSB = 1)**: "Active" mode - new work has been posted
+- **Even (LSB = 0)**: "Sleepy" mode - no new work since last sleepy announcement
+- **Odd (LSB = 1)**: "Active" mode - new work has been posted
 
 **Protocol flow**:
 
@@ -110,9 +106,8 @@ Worker going to sleep:                Job poster:
 ```
 
 This ensures:
-
-* If work arrives while worker is "sleepy but awake", worker sees JEC change
-* If work arrives after worker sleeps, poster will wake them explicitly
+- If work arrives while worker is "sleepy but awake", worker sees JEC change
+- If work arrives after worker sleeps, poster will wake them explicitly
 
 ```zig
 fn incrementJecIfSleepy(self: *AtomicCounters) u64 {
@@ -157,11 +152,10 @@ State Machine:
 ```
 
 **State meanings**:
-
-* **UNSET (0)**: Worker is active, not trying to sleep
-* **SLEEPY (1)**: Worker announced intent to sleep, one more check pending
-* **SLEEPING (2)**: Worker is blocked on condvar
-* **SET (3)**: Work has been assigned, worker should wake
+- **UNSET (0)**: Worker is active, not trying to sleep
+- **SLEEPY (1)**: Worker announced intent to sleep, one more check pending
+- **SLEEPING (2)**: Worker is blocked on condvar
+- **SET (3)**: Work has been assigned, worker should wake
 
 **Why 4 states?** Prevents the "tickle-then-get-sleepy" race:
 
@@ -224,7 +218,6 @@ Workers progress through idle states to balance latency vs CPU usage:
 ```
 
 **Key constants**:
-
 ```zig
 const ROUNDS_UNTIL_SLEEPY: u32 = 32;   // Yield 32 times before announcing
 const ROUNDS_UNTIL_SLEEPING: u32 = 33; // One more yield after announcing
@@ -262,7 +255,6 @@ fn newJobs(self: *Sleep, num_jobs: u32, queue_was_empty: bool) void {
 ```
 
 **Critical invariant**: The waker decrements `sleeping_threads`, not the sleeper. This ensures:
-
 1. Sleeper registers before blocking -> count is accurate
 2. Waker sees sleeper in count -> knows to signal condvar
 3. Waker decrements count -> prevents double-wake
@@ -308,10 +300,9 @@ Blitz uses two SeqCst fences to handle the race between job injection and sleep:
 ```
 
 **Important**: Internal jobs (pushed to deques) do NOT need a fence because:
-
-* Deque operations use acquire/release semantics
-* Thieves naturally synchronize via CAS on deque.top
-* Only cross-thread Treiber stack access needs the fence
+- Deque operations use acquire/release semantics
+- Thieves naturally synchronize via CAS on deque.top
+- Only cross-thread Treiber stack access needs the fence
 
 ## Worker Main Loop
 
@@ -394,10 +385,9 @@ if (idle.rounds < ROUNDS_UNTIL_SLEEPY) {
 ```
 
 **Why**: Spinning with `spinLoopHint()` caused benchmark variance because:
-
-* CPU cores weren't being shared fairly
-* Other threads couldn't make progress
-* Yielding gives OS scheduler control, reducing variance
+- CPU cores weren't being shared fairly
+- Other threads couldn't make progress
+- Yielding gives OS scheduler control, reducing variance
 
 ### 2. Packed Counters in Single Atomic
 

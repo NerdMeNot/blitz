@@ -1,7 +1,6 @@
 ---
 title: Introduction
 description: High-performance, lock-free work-stealing parallel runtime for Zig
-slug: v1.0.0-zig0.15.2
 ---
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
@@ -10,10 +9,10 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 ## Why Blitz?
 
-* **Zero-overhead abstractions** - Pay only for what you use
-* **Automatic load balancing** - Work-stealing ensures all cores stay busy
-* **Composable iterators** - Chain operations like Rayon's parallel iterators
-* **No external dependencies** - Pure Zig, works anywhere Zig works
+- **Zero-overhead abstractions** - Pay only for what you use
+- **Automatic load balancing** - Work-stealing ensures all cores stay busy
+- **Composable iterators** - Chain operations like Rayon's parallel iterators
+- **No external dependencies** - Pure Zig, works anywhere Zig works
 
 ## Quick Example
 
@@ -62,15 +61,12 @@ Blitz achieves significant speedups over Rust's Rayon on equivalent benchmarks:
   <Card title="Parallel Iterators" icon="rocket">
     Rayon-style composable iterators: `sum()`, `min()`, `max()`, `findAny()`, `any()`, `all()`, `reduce()`, and more. Automatic parallelization with early-exit support.
   </Card>
-
   <Card title="Fork-Join" icon="puzzle">
     Efficient divide-and-conquer with `join()`. Supports heterogeneous return types and up to 8 parallel tasks. Perfect for recursive algorithms.
   </Card>
-
   <Card title="Work Stealing" icon="random">
     Lock-free Chase-Lev deque with Rayon's sleep/wake protocol. Optimal load balancing with minimal contention and smart thread sleeping.
   </Card>
-
   <Card title="Parallel Sorting" icon="bars-descending">
     Pattern-defeating quicksort (PDQSort) with automatic parallelization. 10x faster than `std.mem.sort` on large arrays.
   </Card>
@@ -197,32 +193,25 @@ const result = blitz.parallelReduce(T, n, identity, Context, ctx, mapFn, combine
 
 ## When NOT to Use Blitz
 
-* **Small data (\<1000 elements)** - Overhead exceeds benefit
-* **I/O-bound workloads** - Blitz is optimized for CPU-bound work
-* **Shared mutable state** - Use atomic operations or avoid parallelism
+- **Small data (&lt;1000 elements)** - Overhead exceeds benefit
+- **I/O-bound workloads** - Blitz is optimized for CPU-bound work
+- **Shared mutable state** - Use atomic operations or avoid parallelism
 
 ## Next Steps
 
 <CardGrid>
   <LinkCard title="Installation" href="/getting-started/installation/" description="Add Blitz to your Zig project" />
-
   <LinkCard title="Quick Start" href="/getting-started/quick-start/" description="Get running in 5 minutes" />
-
   <LinkCard title="Iterators Guide" href="/usage/iterators/" description="Learn the recommended API" />
-
   <LinkCard title="API Reference" href="/api/core-api/" description="Complete function reference" />
-
   <LinkCard title="Cookbook" href="/cookbook/" description="10 real-world recipes with complete code" />
-
   <LinkCard title="Choosing the Right API" href="/guides/choosing-api/" description="Decision guide for which API to use" />
-
   <LinkCard title="Performance Tuning" href="/guides/performance-tuning/" description="Get the most out of your hardware" />
-
   <LinkCard title="Migration Guide" href="/guides/migration/" description="Convert sequential code to parallel" />
 </CardGrid>
 
 ## Requirements
 
-* **Zig 0.15.0** or later
-* **POSIX** (Linux, macOS) or **Windows**
-* No external dependencies
+- **Zig 0.15.0** or later
+- **POSIX** (Linux, macOS) or **Windows**
+- No external dependencies

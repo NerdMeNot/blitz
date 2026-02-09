@@ -1,7 +1,6 @@
 ---
 title: Log File Analysis
 description: Search and analyze log entries in parallel using Blitz iterator operations
-slug: v1.0.0-zig0.15.2/cookbook/log-analysis
 ---
 
 ## Problem

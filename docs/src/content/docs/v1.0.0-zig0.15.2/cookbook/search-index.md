@@ -1,8 +1,6 @@
 ---
 title: Parallel Search Index
-description: Build an inverted search index in parallel using parallelCollect,
-  parallelFlatten, and parallelReduce
-slug: v1.0.0-zig0.15.2/cookbook/search-index
+description: Build an inverted search index in parallel using parallelCollect, parallelFlatten, and parallelReduce
 ---
 
 Build an inverted search index in parallel -- tokenize documents, construct posting lists, and merge partial indices.

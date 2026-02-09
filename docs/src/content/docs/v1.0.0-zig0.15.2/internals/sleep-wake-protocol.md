@@ -1,8 +1,6 @@
 ---
 title: Sleep/Wake Protocol
-description: The Rayon-style JEC (Jobs Event Counter) protocol that coordinates
-  worker sleep/wake efficiently.
-slug: v1.0.0-zig0.15.2/internals/sleep-wake-protocol
+description: The Rayon-style JEC (Jobs Event Counter) protocol that coordinates worker sleep/wake efficiently.
 ---
 
 ## Overview
@@ -36,14 +34,12 @@ AtomicCounters (u64):
 ```
 
 **JEC States:**
-
-* **Even (LSB = 0)**: "Sleepy" mode - no new work since last sleepy announcement
-* **Odd (LSB = 1)**: "Active" mode - new work has been posted
+- **Even (LSB = 0)**: "Sleepy" mode - no new work since last sleepy announcement
+- **Odd (LSB = 1)**: "Active" mode - new work has been posted
 
 ### The Protocol
 
 **When worker announces intent to sleep (Round 32):**
-
 ```zig
 // Worker toggles JEC, then saves CURRENT value (not the old value!)
 _ = self.counters.incrementJecIfSleepy();
@@ -56,7 +52,6 @@ its snapshot--even though no new work arrived. This causes a "partial wake storm
 where workers never reach condvar sleep.
 
 **When poster submits work:**
-
 ```zig
 // Poster toggles JEC if even (to signal new work)
 const old = self.counters.incrementJecIfSleepy();
@@ -64,7 +59,6 @@ const old = self.counters.incrementJecIfSleepy();
 ```
 
 **Before worker actually sleeps:**
-
 ```zig
 // Worker checks if JEC changed since announcement
 const jec_now = AtomicCounters.extractJec(counters);
@@ -158,23 +152,20 @@ State Machine:
 ```
 
 **State meanings:**
-
-* **UNSET (0)**: Worker is active, not trying to sleep
-* **SLEEPY (1)**: Worker announced intent to sleep, doing final checks
-* **SLEEPING (2)**: Worker is blocked on condvar
-* **SET (3)**: Work has been assigned, worker should wake
+- **UNSET (0)**: Worker is active, not trying to sleep
+- **SLEEPY (1)**: Worker announced intent to sleep, doing final checks
+- **SLEEPING (2)**: Worker is blocked on condvar
+- **SET (3)**: Work has been assigned, worker should wake
 
 **Why 4 states instead of 2?**
 
 With just AWAKE/SLEEPING:
-
 ```
 Worker: state = SLEEPING    Poster: if (state == SLEEPING) wake();
 Worker: wait();             // Poster might not see SLEEPING yet!
 ```
 
 With SLEEPY intermediate state:
-
 ```
 Worker: state = SLEEPY      // Announce intent
 Worker: final_check()       Poster: if (state >= SLEEPY) wake();
@@ -246,10 +237,9 @@ fn sleep(...) void {
 Ensures we see any jobs injected before we registered as sleeping.
 
 **Why only for injected jobs?** Internal jobs (pushed to deques) don't need fences because:
-
-* Deque operations use acquire/release semantics
-* Thieves synchronize via CAS on deque.top
-* The JEC protocol handles the sleep/wake race
+- Deque operations use acquire/release semantics
+- Thieves synchronize via CAS on deque.top
+- The JEC protocol handles the sleep/wake race
 
 ## Critical Invariant: Waker Decrements
 
@@ -271,11 +261,10 @@ fn wakeSpecificThread(self: *Sleep, state: *WorkerSleepState) bool {
 ```
 
 **Why?** If the sleeper decremented its own count:
-
-1. Sleeper increments sleeping\_count
+1. Sleeper increments sleeping_count
 2. Sleeper blocks
-3. Poster sees sleeping\_count > 0, decides to wake
-4. Sleeper wakes, decrements sleeping\_count
+3. Poster sees sleeping_count > 0, decides to wake
+4. Sleeper wakes, decrements sleeping_count
 5. But what if step 4 happens before step 3 completes?
 
 By having the waker decrement, we ensure the count is accurate.
@@ -297,13 +286,12 @@ By having the waker decrement, we ensure the count is accurate.
 | **JEC + condvar** | ~10-100us | Near-zero | Complex |
 
 Blitz uses JEC + condvar because:
-
-* Low latency for bursty workloads (yield phase catches quick work)
-* Near-zero CPU when truly idle (condvar sleep)
-* No missed wakes (JEC protocol guarantees)
+- Low latency for bursty workloads (yield phase catches quick work)
+- Near-zero CPU when truly idle (condvar sleep)
+- No missed wakes (JEC protocol guarantees)
 
 ## References
 
 1. Rayon sleep implementation: `rayon-core/src/sleep/mod.rs`
 2. Rayon sleep protocol explanation: `rayon-core/src/sleep/README.md`
-3. Blitz implementation: `pool.zig`
+3. Blitz implementation: `Pool.zig` (Sleep struct and JEC protocol are embedded in the pool)

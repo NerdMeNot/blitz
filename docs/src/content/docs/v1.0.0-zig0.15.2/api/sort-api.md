@@ -3,7 +3,6 @@ title: Sort API Reference
 description: Parallel PDQSort (Pattern-Defeating Quicksort)
 sidebar:
   order: 3
-slug: v1.0.0-zig0.15.2/api/sort-api
 ---
 
 Parallel PDQSort (Pattern-Defeating Quicksort).
@@ -19,7 +18,7 @@ blitz.sortByKey(...)
 blitz.sortByCachedKey(...)
 ```
 
-***
+---
 
 ## Basic Sorting
 
@@ -57,7 +56,7 @@ blitz.sortDesc(i64, &data);
 // data is now [9, 8, 5, 2, 1]
 ```
 
-***
+---
 
 ## Sort by Key
 
@@ -80,10 +79,9 @@ blitz.sortByKey(Person, u32, people, struct {
 Two-phase sort: compute keys in parallel, then sort by cached keys.
 
 **When to use:**
-
-* Key function is expensive (>100ns per call)
-* Large arrays (>10K elements)
-* Key computation parallelizes well
+- Key function is expensive (>100ns per call)
+- Large arrays (>10K elements)
+- Key computation parallelizes well
 
 ```zig
 try blitz.sortByCachedKey(Person, u32, allocator, people, struct {
@@ -93,7 +91,7 @@ try blitz.sortByCachedKey(Person, u32, allocator, people, struct {
 }.expensiveKey);
 ```
 
-***
+---
 
 ## Comparator Requirements
 
@@ -112,29 +110,27 @@ fn badLessThan(a: T, b: T) bool {
 ```
 
 **Properties:**
-
 1. **Irreflexive**: `lessThan(a, a)` is `false`
 2. **Asymmetric**: if `lessThan(a, b)` then `!lessThan(b, a)`
 3. **Transitive**: if `lessThan(a, b)` and `lessThan(b, c)` then `lessThan(a, c)`
 
-***
+---
 
 ## Performance Characteristics
 
 | Array Size | Expected Performance |
 |------------|---------------------|
-| \< 24 | Insertion sort (immediate) |
+| < 24 | Insertion sort (immediate) |
 | 24 - 8192 | Sequential PDQSort |
 | > 8192 | Parallel PDQSort |
 
 **Benchmark (10M random i64):**
-
 ```
 std.mem.sort: 4,644 ms
 Blitz PDQSort:  430 ms  (10.8x faster)
 ```
 
-***
+---
 
 ## Algorithm Selection
 
@@ -148,7 +144,7 @@ PDQSort automatically adapts:
 | Many duplicates | Three-way partition |
 | Bad pivots | Fallback to heapsort |
 
-***
+---
 
 ## Memory Usage
 
@@ -159,27 +155,26 @@ PDQSort automatically adapts:
 | `sortByKey` | O(log n) stack |
 | `sortByCachedKey` | O(n) for keys + O(n) for indices |
 
-***
+---
 
 ## Stability
 
 **Blitz sort is NOT stable.** Equal elements may be reordered.
 
 For stable sorting:
-
 ```zig
 // Use std library stable sort
 std.mem.sort(T, data, {}, lessThanFn);
 ```
 
-***
+---
 
 ## Thread Safety
 
-* Sorting the same array from multiple threads: **NOT SAFE**
-* Sorting different arrays concurrently: **SAFE**
+- Sorting the same array from multiple threads: **NOT SAFE**
+- Sorting different arrays concurrently: **SAFE**
 
-***
+---
 
 ## Example: Sort Structs
 

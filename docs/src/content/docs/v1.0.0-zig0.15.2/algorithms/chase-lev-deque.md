@@ -1,7 +1,6 @@
 ---
 title: Chase-Lev Deque
 description: The lock-free double-ended queue at the heart of work stealing.
-slug: v1.0.0-zig0.15.2/algorithms/chase-lev-deque
 ---
 
 ## Overview
@@ -101,10 +100,9 @@ pub fn push(self: *Self, item: T) void {
 ```
 
 **Why it's wait-free:**
-
-* No loops
-* No CAS operations
-* Just a write and atomic store
+- No loops
+- No CAS operations
+- Just a write and atomic store
 
 ### Pop (Owner Only)
 
@@ -142,7 +140,6 @@ pub fn pop(self: *Self) ?T {
 ```
 
 **The tricky case:**
-
 ```
 Before:  top=5, bottom=6  (one item at index 5)
 
@@ -190,7 +187,6 @@ pub fn steal(self: *Self) struct { result: StealResult, item: ?T } {
 ```
 
 **Why CAS?**
-
 ```
 Multiple thieves trying to steal:
 
@@ -206,7 +202,7 @@ Thief B: CAS(3→4) fails (top is now 4), retries
 
 ## Memory Ordering
 
-### Why seq\_cst on Critical Operations?
+### Why seq_cst on Critical Operations?
 
 ```zig
 // Pop
@@ -219,26 +215,24 @@ var t = self.top.load(.acquire);
 const b = self.bottom.load(.acquire);
 ```
 
-The seq\_cst ensures:
-
+The seq_cst ensures:
 1. Pop's bottom decrement is visible before checking top
 2. Steal's top read is ordered with bottom read
 
 Without this, we could have:
-
-* Pop thinks deque has 2 items (stale top)
-* Steal thinks deque has 2 items (stale bottom)
-* Both try to take "different" items that are actually the same!
+- Pop thinks deque has 2 items (stale top)
+- Steal thinks deque has 2 items (stale bottom)
+- Both try to take "different" items that are actually the same!
 
 ## Comparison with Alternatives
 
 | Deque Type | Push | Pop | Steal | Notes |
 |------------|------|-----|-------|-------|
-| **Chase-Lev** | Wait-free | Wait-free\* | Lock-free | Best for work stealing |
+| **Chase-Lev** | Wait-free | Wait-free* | Lock-free | Best for work stealing |
 | Mutex-based | O(1) + lock | O(1) + lock | O(1) + lock | Simple but slow |
 | Michael-Scott | Lock-free | Lock-free | Lock-free | For queues, not deques |
 
-\*Wait-free except for single-item case requiring CAS
+*Wait-free except for single-item case requiring CAS
 
 ## Optimization: No ABA Problem
 

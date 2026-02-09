@@ -1,7 +1,6 @@
 ---
 title: Parallel For
 description: Execute a function over a range with automatic work distribution
-slug: v1.0.0-zig0.15.2/usage/parallel-for
 ---
 
 Execute a function over a range `[0, n)` with automatic work distribution.
@@ -216,7 +215,7 @@ fn adjustBrightness(pixels: []Pixel, factor: f32) void {
 }
 ```
 
-See the [Image Processing cookbook recipe](/v1.0.0-zig0.15.2/cookbook/image-processing/) for a complete pipeline.
+See the [Image Processing cookbook recipe](/cookbook/image-processing/) for a complete pipeline.
 
 ## Performance Tips
 
@@ -227,14 +226,14 @@ See the [Image Processing cookbook recipe](/v1.0.0-zig0.15.2/cookbook/image-proc
 
 ## When NOT to Use
 
-* **Small n (\<1000)**: Overhead exceeds benefit
-* **Memory-bound ops**: May not scale with cores
-* **Shared mutable state**: Race conditions!
+- **Small n (&lt;1000)**: Overhead exceeds benefit
+- **Memory-bound ops**: May not scale with cores
+- **Shared mutable state**: Race conditions!
 
-Use `blitz.internal.shouldParallelize()` to decide automatically:
+A simple size check is usually sufficient:
 
 ```zig
-if (blitz.internal.shouldParallelize(.transform, data.len)) {
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     blitz.parallelFor(data.len, ctx_type, ctx, bodyFn);
 } else {
     // Sequential fallback

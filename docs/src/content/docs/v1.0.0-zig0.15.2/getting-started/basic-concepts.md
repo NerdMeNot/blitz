@@ -1,7 +1,6 @@
 ---
 title: Basic Concepts
 description: Understanding Blitz's execution model and core concepts
-slug: v1.0.0-zig0.15.2/getting-started/basic-concepts
 ---
 
 Understanding Blitz's execution model and core concepts.
@@ -98,8 +97,8 @@ blitz.parallelForWithGrain(n, ctx_type, ctx, bodyFn, 1000);
 Blitz automatically avoids parallelization for small data:
 
 ```zig
-// Uses internal threshold heuristics
-if (blitz.internal.shouldParallelize(.sum, data.len)) {
+// Simple size check against default grain size (65536)
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     // Parallel path
 } else {
     // Sequential path (less overhead)
@@ -107,10 +106,9 @@ if (blitz.internal.shouldParallelize(.sum, data.len)) {
 ```
 
 The threshold depends on:
-
-* **Operation type**: Memory-bound ops need more data
-* **Worker count**: More workers = higher threshold
-* **Data size**: Must amortize fork/join overhead
+- **Operation type**: Memory-bound ops need more data
+- **Worker count**: More workers = higher threshold
+- **Data size**: Must amortize fork/join overhead
 
 ## Context Pattern
 
@@ -163,7 +161,6 @@ blitz.deinit();
 ```
 
 **Important**:
-
-* `init()` can be called multiple times (idempotent)
-* Always pair with `deinit()` using `defer`
-* Worker threads are reused across all operations
+- `init()` returns `error.AlreadyInitialized` if called twice — always pair with `deinit()`
+- Always pair with `deinit()` using `defer`
+- Worker threads are reused across all operations

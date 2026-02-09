@@ -1,7 +1,6 @@
 ---
 title: Parallel Iterators
 description: Rayon-style composable parallel iterators for expressive data processing
-slug: v1.0.0-zig0.15.2/usage/iterators
 ---
 
 Rayon-style composable parallel iterators for expressive data processing.

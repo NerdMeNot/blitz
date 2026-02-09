@@ -1,8 +1,6 @@
 ---
 title: Game Physics
-description: Parallel particle and entity physics simulation using parallelFor
-  and parallelReduce
-slug: v1.0.0-zig0.15.2/cookbook/game-physics
+description: Parallel particle and entity physics simulation using parallelFor and parallelReduce
 ---
 
 Simulate game physics in parallel -- updating particle positions, computing forces, and detecting collisions across thousands of entities.

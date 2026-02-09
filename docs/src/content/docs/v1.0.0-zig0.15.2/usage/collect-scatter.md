@@ -1,8 +1,6 @@
 ---
 title: Collect & Scatter
-description: Parallel map-collect, in-place transforms, flatten, scatter, and
-  SyncPtr for lock-free writes
-slug: v1.0.0-zig0.15.2/usage/collect-scatter
+description: Parallel map-collect, in-place transforms, flatten, scatter, and SyncPtr for lock-free writes
 ---
 
 Parallel collection primitives for gathering, transforming, and distributing data. These APIs follow the Polars-style pattern of computing offsets, then writing in parallel without locks.
@@ -332,8 +330,8 @@ Each step is simple and composable. The key insight is that once offsets are com
 
 | Goal | API | Notes |
 |------|-----|-------|
-| Transform A\[] to B\[] | `parallelCollect` | Different input/output types |
-| Transform A\[] in-place | `parallelMapInPlace` | No allocation needed |
+| Transform A[] to B[] | `parallelCollect` | Different input/output types |
+| Transform A[] in-place | `parallelMapInPlace` | No allocation needed |
 | Merge slice-of-slices | `parallelFlatten` | Auto-computes offsets |
 | Merge with known offsets | `parallelFlattenWithOffsets` | Reuse pre-computed offsets |
 | Write to arbitrary positions | `parallelScatter` | Index-based placement |

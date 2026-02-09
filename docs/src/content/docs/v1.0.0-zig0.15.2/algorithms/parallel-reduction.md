@@ -1,7 +1,6 @@
 ---
 title: Parallel Reduction
 description: Tree-based reduction for aggregating data in parallel.
-slug: v1.0.0-zig0.15.2/algorithms/parallel-reduction
 ---
 
 ## Overview
@@ -270,13 +269,13 @@ Parallel reduce       4.1 ms     8.6x
 
 | Data Size | Recommendation |
 |-----------|----------------|
-| \< 1,000 | Sequential (overhead too high) |
+| < 1,000 | Sequential (overhead too high) |
 | > 1,000 | Parallel reduce |
 
-Use threshold heuristics:
+Use a size threshold:
 
 ```zig
-if (blitz.internal.shouldParallelize(.sum, data.len)) {
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     return parallelReduce(...);
 } else {
     return sequentialReduce(...);

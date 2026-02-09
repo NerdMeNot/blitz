@@ -3,7 +3,6 @@ title: Iterators API Reference
 description: Complete reference for Blitz's Rayon-style parallel iterators
 sidebar:
   order: 2
-slug: v1.0.0-zig0.15.2/api/iterators-api
 ---
 
 Complete reference for Blitz's Rayon-style parallel iterators.
@@ -34,7 +33,7 @@ const sum = it.sum();  // 15
 
 **Thread Safety:** Read-only access, fully thread-safe.
 
-***
+---
 
 ### `blitz.iterMut(T, slice) -> ParIterMut(T)`
 
@@ -51,7 +50,7 @@ fn double(x: i64) i64 { return x * 2; }
 
 **Thread Safety:** Each element written by exactly one thread (disjoint access).
 
-***
+---
 
 ### `blitz.range(start, end) -> RangeIter`
 
@@ -66,7 +65,7 @@ fn processIndex(i: usize) void {
 }
 ```
 
-***
+---
 
 ## ParIter(T) Methods
 
@@ -83,7 +82,7 @@ const sum = blitz.iter(i64, &data).sum();  // 15
 
 **Returns:** Sum of all elements (0 for empty slice)
 
-***
+---
 
 #### `min() -> ?T`
 
@@ -98,7 +97,7 @@ if (min) |m| {
 
 **Returns:** `?T` - The minimum, or `null` for empty slice
 
-***
+---
 
 #### `max() -> ?T`
 
@@ -110,7 +109,7 @@ const max = blitz.iter(i64, &data).max();  // ?i64
 
 **Returns:** `?T` - The maximum, or `null` for empty slice
 
-***
+---
 
 #### `count() -> usize`
 
@@ -120,7 +119,7 @@ Count the number of elements.
 const n = blitz.iter(i64, &data).count();  // 5
 ```
 
-***
+---
 
 ### Custom Reduce
 
@@ -135,13 +134,12 @@ fn multiply(a: i64, b: i64) i64 { return a * b; }
 ```
 
 **Parameters:**
-
-* `identity`: `T` - Identity value for the operation (e.g., 0 for sum, 1 for product)
-* `reducer`: `fn(T, T) T` - Associative binary operation
+- `identity`: `T` - Identity value for the operation (e.g., 0 for sum, 1 for product)
+- `reducer`: `fn(T, T) T` - Associative binary operation
 
 **Requirements:** The reducer must be associative: `f(f(a,b), c) == f(a, f(b,c))`
 
-***
+---
 
 ### Find Operations
 
@@ -157,7 +155,7 @@ fn isNegative(x: i64) bool { return x < 0; }
 
 **Performance:** Supports early exit - stops when any thread finds a match.
 
-***
+---
 
 #### `findFirst(predicate) -> ?FindResult(T)`
 
@@ -172,13 +170,13 @@ if (result) |r| {
 
 **Returns:** `?struct { index: usize, value: T }` - First match with index
 
-***
+---
 
 #### `findLast(predicate) -> ?FindResult(T)`
 
 Find the last element matching the predicate (deterministic order).
 
-***
+---
 
 #### `position(predicate) -> ?usize`
 
@@ -188,13 +186,13 @@ Find the index of the first matching element.
 const pos = blitz.iter(i64, &data).position(isNegative);
 ```
 
-***
+---
 
 #### `rposition(predicate) -> ?usize`
 
 Find the index of the last matching element.
 
-***
+---
 
 ### Predicates (Early Exit)
 
@@ -208,7 +206,7 @@ const hasNegative = blitz.iter(i64, &data).any(isNegative);
 
 **Performance:** Early exit when match found - can be 100-1000x faster than full scan.
 
-***
+---
 
 #### `all(predicate) -> bool`
 
@@ -220,7 +218,7 @@ const allPositive = blitz.iter(i64, &data).all(isPositive);
 fn isPositive(x: i64) bool { return x > 0; }
 ```
 
-***
+---
 
 ### Min/Max by Comparator or Key
 
@@ -238,13 +236,13 @@ fn compareByAge(a: Person, b: Person) std.math.Order {
 }
 ```
 
-***
+---
 
 #### `maxBy(comparator) -> ?T`
 
 Find maximum using a custom comparator.
 
-***
+---
 
 #### `minByKey(K, key_fn) -> ?T`
 
@@ -256,13 +254,13 @@ const youngest = blitz.iter(Person, &people).minByKey(u32, getAge);
 fn getAge(p: Person) u32 { return p.age; }
 ```
 
-***
+---
 
 #### `maxByKey(K, key_fn) -> ?T`
 
 Find maximum by extracting a comparable key.
 
-***
+---
 
 ### Transformations
 
@@ -279,7 +277,7 @@ fn square(x: i64) i64 { return x * x; }
 
 **Note:** Lazy evaluation - transformation applied when consumed.
 
-***
+---
 
 #### `forEach(func) -> void`
 
@@ -295,7 +293,7 @@ fn process(x: i64) void {
 
 **Note:** No ordering guarantee - elements processed in parallel.
 
-***
+---
 
 #### `collect(allocator) -> ![]T`
 
@@ -306,7 +304,7 @@ const copy = try blitz.iter(i64, &data).collect(allocator);
 defer allocator.free(copy);
 ```
 
-***
+---
 
 ### Sub-Iterators
 
@@ -319,7 +317,7 @@ const chunks = blitz.iter(f64, &data).chunks_iter(1000);
 const numChunks = chunks.count();  // ceil(data.len / 1000)
 ```
 
-***
+---
 
 #### `enumerate_iter() -> EnumerateIter(T)`
 
@@ -334,7 +332,7 @@ fn processWithIndex(index: usize, value: i64) void {
 }
 ```
 
-***
+---
 
 ## ParIterMut(T) Methods
 
@@ -353,7 +351,7 @@ fn double(x: i64) i64 { return x * 2; }
 
 **Thread Safety:** Each element written by exactly one thread.
 
-***
+---
 
 ### `fill(value) -> void`
 
@@ -364,7 +362,7 @@ var it = blitz.iterMut(i64, &data);
 it.fill(0);  // Zero all elements
 ```
 
-***
+---
 
 ## RangeIter Methods
 
@@ -378,7 +376,7 @@ const total = blitz.range(0, 1000).sum(i64, identity);
 fn identity(i: usize) i64 { return @intCast(i); }
 ```
 
-***
+---
 
 ### `forEach(func) -> void`
 
@@ -392,7 +390,7 @@ fn processIndex(i: usize) void {
 }
 ```
 
-***
+---
 
 ## Performance Comparison
 
@@ -404,7 +402,7 @@ fn processIndex(i: usize) void {
 | findAny (10M) | 35 ms | 0.1 ms | 350x |
 | mapInPlace (10M) | 25 ms | 3 ms | 8x |
 
-***
+---
 
 ## Best Practices
 

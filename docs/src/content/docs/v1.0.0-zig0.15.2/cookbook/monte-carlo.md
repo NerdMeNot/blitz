@@ -1,7 +1,6 @@
 ---
 title: Monte Carlo Simulation
 description: Estimate pi using parallel random sampling with Blitz
-slug: v1.0.0-zig0.15.2/cookbook/monte-carlo
 ---
 
 ## Problem
@@ -145,7 +144,7 @@ Samples:  100,000,000, Pi ~ 3.141571, Error: 0.0007%, Time: 98.50ms
 
 ## How It Works
 
-**Monte Carlo method.** A quarter circle of radius 1 inscribed in a unit square has area pi/4. By uniformly sampling points in the unit square and measuring the fraction that fall inside the quarter circle, we get an estimate: pi ~= 4 \* (hits / total).
+**Monte Carlo method.** A quarter circle of radius 1 inscribed in a unit square has area pi/4. By uniformly sampling points in the unit square and measuring the fraction that fall inside the quarter circle, we get an estimate: pi ~= 4 * (hits / total).
 
 **`parallelReduce` for the simple version.** Each sample index maps to either 1 (inside the circle) or 0 (outside). The combine function is addition, which is associative. The identity element is 0. Blitz splits the index range across workers, each computing partial hit counts, then combines them in a tree reduction.
 

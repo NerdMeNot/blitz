@@ -1,7 +1,6 @@
 ---
 title: Cookbook Overview
 description: Practical recipes for common parallel computing tasks using Blitz
-slug: v1.0.0-zig0.15.2/cookbook
 ---
 
 Practical recipes showing how to solve real-world problems with Blitz. Each recipe follows the same structure: a problem statement, a complete solution with working Zig code, an explanation of which APIs are used and why, and performance guidance.
@@ -10,11 +9,11 @@ Practical recipes showing how to solve real-world problems with Blitz. Each reci
 
 | Recipe | Description | Key APIs |
 |--------|-------------|----------|
-| [Image Processing](/v1.0.0-zig0.15.2/cookbook/image-processing/) | Pixel transforms, grayscale conversion, and gaussian blur on image buffers | `parallelFor`, `iterMut().mapInPlace()` |
-| [CSV Data Parsing](/v1.0.0-zig0.15.2/cookbook/csv-parsing/) | Parse CSV lines in parallel and aggregate numeric results | `parallelReduce`, `join()` |
-| [Monte Carlo Simulation](/v1.0.0-zig0.15.2/cookbook/monte-carlo/) | Estimate pi using random sampling across threads | `parallelReduce`, `range()` |
-| [Log File Analysis](/v1.0.0-zig0.15.2/cookbook/log-analysis/) | Search logs for patterns, count errors, and find specific entries | `iter().any()`, `iter().findAny()`, `join()` |
-| [Matrix Multiplication](/v1.0.0-zig0.15.2/cookbook/matrix-multiplication/) | Dense matrix multiply with parallel row computation | `parallelFor` with context |
+| [Image Processing](/cookbook/image-processing/) | Pixel transforms, grayscale conversion, and gaussian blur on image buffers | `parallelFor`, `iterMut().mapInPlace()` |
+| [CSV Data Parsing](/cookbook/csv-parsing/) | Parse CSV lines in parallel and aggregate numeric results | `parallelReduce`, `join()` |
+| [Monte Carlo Simulation](/cookbook/monte-carlo/) | Estimate pi using random sampling across threads | `parallelReduce`, `range()` |
+| [Log File Analysis](/cookbook/log-analysis/) | Search logs for patterns, count errors, and find specific entries | `iter().any()`, `iter().findAny()`, `join()` |
+| [Matrix Multiplication](/cookbook/matrix-multiplication/) | Dense matrix multiply with parallel row computation | `parallelFor` with context |
 
 ## Choosing the Right API
 

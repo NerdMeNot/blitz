@@ -1,8 +1,6 @@
 ---
 title: Image Processing Pipeline
-description: Parallel pixel transforms including brightness, grayscale, and
-  gaussian blur using Blitz
-slug: v1.0.0-zig0.15.2/cookbook/image-processing
+description: Parallel pixel transforms including brightness, grayscale, and gaussian blur using Blitz
 ---
 
 ## Problem

@@ -1,12 +1,11 @@
 ---
 title: Matrix Multiplication
 description: Parallel dense matrix multiplication using Blitz parallelFor with context
-slug: v1.0.0-zig0.15.2/cookbook/matrix-multiplication
 ---
 
 ## Problem
 
-You want to multiply two dense matrices C = A \* B where A is M x K and B is K x N. The standard O(M*K*N) algorithm is compute-bound and each row of the result is independent, making it an ideal candidate for parallelization.
+You want to multiply two dense matrices C = A * B where A is M x K and B is K x N. The standard O(M*K*N) algorithm is compute-bound and each row of the result is independent, making it an ideal candidate for parallelization.
 
 ## Solution
 
@@ -203,7 +202,7 @@ pub fn main() !void {
 
 **Context struct carries matrix references.** The `Matrix` struct contains a slice (pointer + length) and dimension metadata. Passing it through the context is lightweight because slices are just 16 bytes (pointer + length). Workers share read access to A and B and have disjoint write access to their rows of C.
 
-**Tiling for cache efficiency.** The naive ijk loop accesses column j of B in the innermost loop, striding by N elements (N \* 8 bytes per stride for f64). This causes cache misses. The tiled version processes 64x64 sub-blocks, keeping the working set small enough for L1 cache. The tile size of 64 uses 64 \* 64 \* 8 = 32 KB, which fits in most L1 data caches.
+**Tiling for cache efficiency.** The naive ijk loop accesses column j of B in the innermost loop, striding by N elements (N * 8 bytes per stride for f64). This causes cache misses. The tiled version processes 64x64 sub-blocks, keeping the working set small enough for L1 cache. The tile size of 64 uses 64 * 64 * 8 = 32 KB, which fits in most L1 data caches.
 
 **Why not parallelize inner loops?** The k-loop (dot product) has a data dependency (accumulating into `sum`) and the j-loop is typically too fine-grained. Row-level parallelism provides the best balance: enough work per task (one full row computation) with no synchronization needed between workers.
 
