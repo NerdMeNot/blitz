@@ -97,8 +97,8 @@ blitz.parallelForWithGrain(n, ctx_type, ctx, bodyFn, 1000);
 Blitz automatically avoids parallelization for small data:
 
 ```zig
-// Uses internal threshold heuristics
-if (blitz.internal.shouldParallelize(.sum, data.len)) {
+// Simple size check against default grain size (65536)
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     // Parallel path
 } else {
     // Sequential path (less overhead)
@@ -161,6 +161,6 @@ blitz.deinit();
 ```
 
 **Important**:
-- `init()` can be called multiple times (idempotent)
+- `init()` returns `error.AlreadyInitialized` if called twice — always pair with `deinit()`
 - Always pair with `deinit()` using `defer`
 - Worker threads are reused across all operations

@@ -230,10 +230,10 @@ See the [Image Processing cookbook recipe](/cookbook/image-processing/) for a co
 - **Memory-bound ops**: May not scale with cores
 - **Shared mutable state**: Race conditions!
 
-Use `blitz.internal.shouldParallelize()` to decide automatically:
+A simple size check is usually sufficient:
 
 ```zig
-if (blitz.internal.shouldParallelize(.transform, data.len)) {
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     blitz.parallelFor(data.len, ctx_type, ctx, bodyFn);
 } else {
     // Sequential fallback

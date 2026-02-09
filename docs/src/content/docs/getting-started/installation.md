@@ -97,10 +97,11 @@ Then in your `build.zig`:
 
 ```zig
 const blitz_mod = b.addModule("blitz", .{
-    .root_source_file = b.path("deps/blitz/mod.zig"),
+    .root_source_file = b.path("deps/blitz/api.zig"),
     .target = target,
     .optimize = optimize,
 });
+blitz_mod.link_libc = true;
 
 exe.root_module.addImport("blitz", blitz_mod);
 ```
@@ -110,8 +111,12 @@ exe.root_module.addImport("blitz", blitz_mod);
 For quick prototyping, copy the blitz source and import directly:
 
 ```zig
-const blitz = @import("path/to/blitz/mod.zig");
+const blitz = @import("path/to/blitz/api.zig");
 ```
+
+:::note
+Blitz requires libc — make sure to add `link_libc = true` on the module or pass `-lc` when building manually.
+:::
 
 ## Verifying Installation
 

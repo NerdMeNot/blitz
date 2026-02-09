@@ -1,54 +1,96 @@
 ---
 title: Synchronization Primitives
-description: Lock-free synchronization building blocks.
+description: Lock-free synchronization building blocks used in Blitz.
 ---
 
 ## Overview
 
-Blitz uses several synchronization primitives, all designed to be lock-free for the hot path.
+Blitz uses several synchronization primitives defined in `Latch.zig` and `Sync.zig`, all designed to be lock-free for the hot path.
 
 ## OnceLatch
 
-Single-fire synchronization point.
+Single-fire synchronization point with a 4-state machine to prevent missed wakes.
 
 ### Use Case
-Signal completion of a single task.
+Signal completion of a single task (e.g., a Future result is ready).
 
 ### Implementation
 
 ```zig
 pub const OnceLatch = struct {
-    state: std.atomic.Value(u32),
-
     const UNSET: u32 = 0;
-    const SET: u32 = 1;
+    const SLEEPY: u32 = 1;
+    const SLEEPING: u32 = 2;
+    const SET: u32 = 3;
+
+    state: std.atomic.Value(u32) = std.atomic.Value(u32).init(UNSET),
 
     pub fn init() OnceLatch {
-        return .{ .state = std.atomic.Value(u32).init(UNSET) };
+        return .{};
     }
 
-    /// Signal completion (one-time only)
-    pub fn set(self: *OnceLatch) void {
-        const prev = self.state.swap(SET, .release);
-        if (prev == UNSET) {
-            // First to set - wake waiters
-            std.os.futex_wake(@ptrCast(&self.state), std.math.maxInt(u32));
-        }
-    }
-
-    /// Check without blocking
-    pub fn isSet(self: *OnceLatch) bool {
+    /// Non-blocking check if done
+    pub inline fn probe(self: *const OnceLatch) bool {
         return self.state.load(.acquire) == SET;
     }
 
-    /// Block until set
+    /// Alias for probe()
+    pub inline fn isDone(self: *const OnceLatch) bool {
+        return self.probe();
+    }
+
+    /// Mark as done and wake any sleepers
+    pub fn setDone(self: *OnceLatch) void {
+        const prev = self.state.swap(SET, .release);
+        if (prev == SLEEPING) {
+            // Waiter is blocked on futex — wake them
+            std.Thread.Futex.wake(@ptrCast(&self.state), 1);
+        }
+    }
+
+    /// Block until done (uses "tickle-then-get-sleepy" pattern)
     pub fn wait(self: *OnceLatch) void {
-        while (!self.isSet()) {
-            std.os.futex_wait(@ptrCast(&self.state), UNSET, null);
+        while (self.state.load(.acquire) != SET) {
+            if (self.getSleepy()) {
+                if (self.fallAsleep()) {
+                    std.Thread.Futex.wait(@ptrCast(&self.state), SLEEPING, null);
+                }
+            }
         }
     }
 };
 ```
+
+### 4-State Protocol
+
+The 4-state machine prevents a race where a waker sets the latch while the waiter is transitioning to sleep:
+
+```
+UNSET (0) ──────────────────────────────── SET (3)
+    │                                         ▲
+    │ getSleepy() [CAS UNSET→SLEEPY]         │ setDone() [swap→SET]
+    ▼                                         │
+SLEEPY (1) ────────────────────────────── SET (3)
+    │                                         ▲
+    │ fallAsleep() [CAS SLEEPY→SLEEPING]     │ setDone() [swap→SET, futex_wake]
+    ▼                                         │
+SLEEPING (2) ─────────────────────────── SET (3)
+    │
+    │ wakeUp() [spurious]
+    ▼
+UNSET (0)
+```
+
+**Why 4 states?** Without the SLEEPY intermediate state:
+
+```
+Thread A (waiter):          Thread B (setter):
+  if (!done) {               setDone();
+                              futex_wake();  // A not sleeping yet!
+    futex_wait();             // MISSED WAKE — A sleeps forever
+```
+
+With SLEEPY state, `setDone()` sees `prev == SLEEPING` and knows to issue a futex wake.
 
 ### Usage
 
@@ -60,7 +102,15 @@ latch.wait();
 // ... proceed after signal
 
 // Thread 2: Signal completion
-latch.set();
+latch.setDone();
+```
+
+Or for non-blocking polling:
+
+```zig
+if (latch.probe()) {
+    // Result is ready
+}
 ```
 
 ## CountLatch
@@ -85,7 +135,7 @@ pub const CountLatch = struct {
         const prev = self.count.fetchSub(1, .acq_rel);
         if (prev == 1) {
             // Last one - wake waiters
-            std.os.futex_wake(@ptrCast(&self.count), std.math.maxInt(u32));
+            std.Thread.Futex.wake(@ptrCast(&self.count), std.math.maxInt(u32));
         }
     }
 
@@ -99,7 +149,7 @@ pub const CountLatch = struct {
         while (true) {
             const count = self.count.load(.acquire);
             if (count == 0) return;
-            std.os.futex_wait(@ptrCast(&self.count), count, null);
+            std.Thread.Futex.wait(@ptrCast(&self.count), count, null);
         }
     }
 };
@@ -110,15 +160,8 @@ pub const CountLatch = struct {
 ```zig
 var latch = CountLatch.init(4);  // Wait for 4 tasks
 
-// Spawn 4 tasks
-for (0..4) |_| {
-    spawn(struct {
-        fn task(l: *CountLatch) void {
-            defer l.decrement();
-            doWork();
-        }
-    }.task, &latch);
-}
+// Spawn 4 tasks, each calls latch.decrement() on completion
+// ...
 
 // Wait for all to complete
 latch.wait();
@@ -126,7 +169,7 @@ latch.wait();
 
 ## SpinWait
 
-Adaptive spinning with backoff.
+Adaptive spinning with exponential backoff.
 
 ### Use Case
 Efficient short-term waiting without syscalls.
@@ -135,23 +178,23 @@ Efficient short-term waiting without syscalls.
 
 ```zig
 pub const SpinWait = struct {
-    count: u32 = 0,
+    iteration: u32 = 0,
 
     const SPIN_LIMIT: u32 = 10;
     const YIELD_LIMIT: u32 = 20;
 
     pub fn spin(self: *SpinWait) void {
-        self.count += 1;
+        self.iteration += 1;
 
-        if (self.count <= SPIN_LIMIT) {
-            // Pure spin with CPU hint
+        if (self.iteration <= SPIN_LIMIT) {
+            // Pure spin with CPU hint (exponential backoff)
             var i: u32 = 0;
-            while (i < 1 << @min(self.count, 6)) : (i += 1) {
+            while (i < 1 << @min(self.iteration, 6)) : (i += 1) {
                 std.atomic.spinLoopHint();
             }
-        } else if (self.count <= YIELD_LIMIT) {
+        } else if (self.iteration <= YIELD_LIMIT) {
             // Yield to other threads
-            std.Thread.yield();
+            std.Thread.yield() catch {};
         } else {
             // Sleep briefly
             std.time.sleep(1000);  // 1 microsecond
@@ -159,14 +202,22 @@ pub const SpinWait = struct {
     }
 
     pub fn reset(self: *SpinWait) void {
-        self.count = 0;
+        self.iteration = 0;
     }
 
-    pub fn shouldYield(self: *SpinWait) bool {
-        return self.count > SPIN_LIMIT;
+    pub fn wouldYield(self: *SpinWait) bool {
+        return self.iteration > SPIN_LIMIT;
     }
 };
 ```
+
+### Phases
+
+| Phase | Iterations | Strategy | Latency |
+|-------|-----------|----------|---------|
+| Spin | 1-10 | `spinLoopHint()` with exponential backoff | ~10-100 ns |
+| Yield | 11-20 | `Thread.yield()` | ~1-5 us |
+| Sleep | 21+ | `time.sleep(1us)` | ~1 us |
 
 ### Usage
 
@@ -181,10 +232,10 @@ wait.reset();
 
 ## SyncPtr
 
-Lock-free pointer for parallel writes to disjoint regions.
+Lock-free pointer for parallel writes to disjoint array regions (defined in `Sync.zig`).
 
 ### Use Case
-Multiple threads writing to non-overlapping array regions.
+Multiple threads writing to non-overlapping array regions without data races.
 
 ### Implementation
 
@@ -199,21 +250,36 @@ pub fn SyncPtr(comptime T: type) type {
             return .{ .ptr = slice.ptr };
         }
 
-        /// Write to specific index (thread-safe if indices are disjoint)
-        pub fn writeAt(self: Self, index: usize, value: T) void {
-            @fence(.release);
-            self.ptr[index] = value;
+        pub fn fromPtr(ptr: [*]T) Self {
+            return .{ .ptr = ptr };
         }
 
-        /// Read from specific index
-        pub fn readAt(self: Self, index: usize) T {
-            const value = self.ptr[index];
-            @fence(.acquire);
-            return value;
+        /// Write to specific offset (thread-safe if offsets are disjoint)
+        pub fn writeAt(self: Self, offset: usize, value: T) void {
+            self.ptr[offset] = value;
+        }
+
+        /// Read from specific offset
+        pub fn readAt(self: Self, offset: usize) T {
+            return self.ptr[offset];
+        }
+
+        /// Get a slice view starting at offset
+        pub fn sliceFrom(self: Self, offset: usize, len: usize) []T {
+            return (self.ptr + offset)[0..len];
+        }
+
+        /// Copy a slice to a specific offset
+        pub fn copyAt(self: Self, offset: usize, src: []const T) void {
+            @memcpy((self.ptr + offset)[0..src.len], src);
         }
     };
 }
 ```
+
+:::note
+SyncPtr does **not** use memory fences internally. Safety is guaranteed by the caller ensuring disjoint access — each thread must write to non-overlapping offsets. This is typically achieved by pre-computing offsets with `computeOffsetsInto()`.
+:::
 
 ### Usage
 
@@ -222,61 +288,15 @@ var buffer: [1000]i64 = undefined;
 const ptr = SyncPtr(i64).init(&buffer);
 
 // Parallel writes to disjoint regions
-blitz.parallelFor(10, struct {
+blitz.parallelFor(1000, struct {
     ptr: SyncPtr(i64),
 }, .{ .ptr = ptr }, struct {
     fn body(ctx: @This(), start: usize, end: usize) void {
         for (start..end) |i| {
-            ctx.ptr.writeAt(i * 100, computeValue(i));
+            ctx.ptr.writeAt(i, computeValue(i));
         }
     }
 }.body);
-```
-
-## Futex Operations
-
-Low-level futex wrapper for Linux/macOS:
-
-```zig
-pub fn futex_wait(ptr: *const u32, expected: u32, timeout: ?u64) void {
-    if (@import("builtin").os.tag == .linux) {
-        _ = std.os.linux.futex(
-            @ptrCast(ptr),
-            std.os.linux.FUTEX.WAIT | std.os.linux.FUTEX.PRIVATE_FLAG,
-            expected,
-            @ptrCast(timeout),
-            null,
-            0,
-        );
-    } else if (@import("builtin").os.tag == .macos) {
-        // macOS uses __ulock_wait
-        darwin.__ulock_wait(
-            darwin.UL_COMPARE_AND_WAIT,
-            @ptrCast(ptr),
-            expected,
-            timeout orelse 0,
-        );
-    }
-}
-
-pub fn futex_wake(ptr: *const u32, count: u32) void {
-    if (@import("builtin").os.tag == .linux) {
-        _ = std.os.linux.futex(
-            @ptrCast(ptr),
-            std.os.linux.FUTEX.WAKE | std.os.linux.FUTEX.PRIVATE_FLAG,
-            count,
-            null,
-            null,
-            0,
-        );
-    } else if (@import("builtin").os.tag == .macos) {
-        darwin.__ulock_wake(
-            darwin.UL_COMPARE_AND_WAIT,
-            @ptrCast(ptr),
-            0,
-        );
-    }
-}
 ```
 
 ## Memory Ordering Reference
@@ -314,8 +334,8 @@ while (head.cmpxchgWeak(new_node.next.load(.relaxed), new_node, .release, .relax
 
 | Primitive | Operation | Time |
 |-----------|-----------|------|
-| OnceLatch | set (uncontended) | ~5 ns |
-| OnceLatch | isSet | ~1 ns |
+| OnceLatch | setDone (uncontended) | ~5 ns |
+| OnceLatch | probe | ~1 ns |
 | OnceLatch | wait (already set) | ~1 ns |
 | CountLatch | decrement | ~5 ns |
 | SpinWait | spin (first few) | ~10 ns |

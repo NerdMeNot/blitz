@@ -137,7 +137,7 @@ Central queue:           Work stealing:
 
 ## Implementation Details
 
-### Chase-Lev Deque (from `deque.zig`)
+### Chase-Lev Deque (from `Deque.zig`)
 
 ```zig
 pub fn Deque(comptime T: type) type {
@@ -198,7 +198,7 @@ pub fn Deque(comptime T: type) type {
 pub const StealResult = enum { empty, success, retry };
 ```
 
-### Progressive Sleep (from `pool.zig`)
+### Progressive Sleep (from `Pool.zig`)
 
 Blitz uses Rayon's JEC (Jobs Event Counter) protocol for sleep coordination:
 

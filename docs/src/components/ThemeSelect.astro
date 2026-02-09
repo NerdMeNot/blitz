@@ -1,100 +1,274 @@
 ---
-// Custom theme toggle to replace the dropdown
+import { readFileSync } from 'node:fs';
+
+let versionsConfig;
+try {
+	versionsConfig = JSON.parse(readFileSync(new URL('../../versions.json', import.meta.url), 'utf-8'));
+} catch {
+	versionsConfig = { current: null, history: [] };
+}
+
+const currentVersion = versionsConfig.current;
+const hasMultipleVersions = versionsConfig.history.length > 0;
+const allVersions = currentVersion
+	? [
+			{ slug: '', label: `${currentVersion} (Latest)` },
+			...versionsConfig.history.map((v: string) => ({ slug: v, label: v })),
+		]
+	: [];
 ---
 
-<starlight-theme-toggle>
-  <button
-    type="button"
-    class="theme-toggle"
-    aria-label="Toggle dark mode"
-  >
-    <!-- Sun icon (shown in dark mode) -->
-    <svg class="icon sun" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="5"></circle>
-      <line x1="12" y1="1" x2="12" y2="3"></line>
-      <line x1="12" y1="21" x2="12" y2="23"></line>
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-      <line x1="1" y1="12" x2="3" y2="12"></line>
-      <line x1="21" y1="12" x2="23" y2="12"></line>
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-    </svg>
-    <!-- Moon icon (shown in light mode) -->
-    <svg class="icon moon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-    </svg>
-  </button>
-</starlight-theme-toggle>
+<div class="header-controls">
+	{/* Version badge or dropdown */}
+	{currentVersion && !hasMultipleVersions && (
+		<span class="version-badge">{currentVersion}</span>
+	)}
+	{currentVersion && hasMultipleVersions && (
+		<blitz-version-select>
+			<button type="button" class="version-trigger" aria-haspopup="listbox">
+				<span class="version-label">{allVersions[0].label}</span>
+				<svg class="caret" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+					<polyline points="6 9 12 15 18 9"></polyline>
+				</svg>
+			</button>
+			<ul class="version-menu" role="listbox" hidden>
+				{allVersions.map((v) => (
+					<li role="option" data-slug={v.slug}>{v.label}</li>
+				))}
+			</ul>
+		</blitz-version-select>
+	)}
+
+	{/* Theme toggle */}
+	<starlight-theme-toggle>
+		<button type="button" class="theme-toggle" aria-label="Toggle dark mode">
+			<svg class="icon sun" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<circle cx="12" cy="12" r="5"></circle>
+				<line x1="12" y1="1" x2="12" y2="3"></line>
+				<line x1="12" y1="21" x2="12" y2="23"></line>
+				<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+				<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+				<line x1="1" y1="12" x2="3" y2="12"></line>
+				<line x1="21" y1="12" x2="23" y2="12"></line>
+				<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+				<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+			</svg>
+			<svg class="icon moon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+			</svg>
+		</button>
+	</starlight-theme-toggle>
+</div>
 
 <style>
-  .theme-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.5rem;
-    border: 0;
-    border-radius: 0.5rem;
-    background: transparent;
-    color: var(--sl-color-gray-1);
-    cursor: pointer;
-    transition: background-color 0.2s;
-  }
+	.header-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
 
-  .theme-toggle:hover {
-    background: var(--sl-color-gray-6);
-  }
+	/* Version badge (single version, no dropdown) */
+	.version-badge {
+		font-size: 0.75rem;
+		font-weight: 500;
+		padding: 0.2rem 0.6rem;
+		border-radius: 999px;
+		background: var(--sl-color-accent-low);
+		color: var(--sl-color-accent-high);
+		white-space: nowrap;
+	}
 
-  .icon {
-    width: 1.25rem;
-    height: 1.25rem;
-  }
+	/* Version dropdown trigger */
+	blitz-version-select {
+		position: relative;
+	}
 
-  /* Show sun in dark mode, moon in light mode */
-  :global([data-theme='dark']) .sun {
-    display: block;
-  }
-  :global([data-theme='dark']) .moon {
-    display: none;
-  }
-  :global(:root:not([data-theme='dark'])) .sun {
-    display: none;
-  }
-  :global(:root:not([data-theme='dark'])) .moon {
-    display: block;
-  }
+	.version-trigger {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.75rem;
+		font-weight: 500;
+		padding: 0.2rem 0.5rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.375rem;
+		background: transparent;
+		color: var(--sl-color-gray-1);
+		cursor: pointer;
+		white-space: nowrap;
+		transition: border-color 0.2s, background-color 0.2s;
+	}
+
+	.version-trigger:hover {
+		border-color: var(--sl-color-gray-3);
+		background: var(--sl-color-gray-6);
+	}
+
+	.caret {
+		transition: transform 0.2s;
+	}
+
+	blitz-version-select[data-open] .caret {
+		transform: rotate(180deg);
+	}
+
+	/* Dropdown menu */
+	.version-menu {
+		position: absolute;
+		top: calc(100% + 0.25rem);
+		right: 0;
+		min-width: 100%;
+		margin: 0;
+		padding: 0.25rem;
+		list-style: none;
+		background: var(--sl-color-bg-nav);
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.5rem;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		z-index: 10;
+	}
+
+	.version-menu[hidden] {
+		display: none;
+	}
+
+	.version-menu li {
+		padding: 0.4rem 0.6rem;
+		font-size: 0.75rem;
+		border-radius: 0.25rem;
+		cursor: pointer;
+		white-space: nowrap;
+		color: var(--sl-color-gray-2);
+		transition: background-color 0.15s;
+	}
+
+	.version-menu li:hover {
+		background: var(--sl-color-gray-6);
+		color: var(--sl-color-gray-1);
+	}
+
+	.version-menu li[aria-selected='true'] {
+		color: var(--sl-color-accent-high);
+		font-weight: 600;
+	}
+
+	/* Theme toggle */
+	.theme-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem;
+		border: 0;
+		border-radius: 0.5rem;
+		background: transparent;
+		color: var(--sl-color-gray-1);
+		cursor: pointer;
+		transition: background-color 0.2s;
+	}
+
+	.theme-toggle:hover {
+		background: var(--sl-color-gray-6);
+	}
+
+	.icon {
+		width: 1.25rem;
+		height: 1.25rem;
+	}
+
+	:global([data-theme='dark']) .sun { display: block; }
+	:global([data-theme='dark']) .moon { display: none; }
+	:global(:root:not([data-theme='dark'])) .sun { display: none; }
+	:global(:root:not([data-theme='dark'])) .moon { display: block; }
 </style>
 
 <script>
-  class StarlightThemeToggle extends HTMLElement {
-    constructor() {
-      super();
-      const button = this.querySelector('button');
+	// Theme toggle
+	class StarlightThemeToggle extends HTMLElement {
+		constructor() {
+			super();
+			const button = this.querySelector('button');
+			button?.addEventListener('click', () => {
+				const currentTheme = document.documentElement.dataset.theme;
+				const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+				document.documentElement.dataset.theme = newTheme;
+				localStorage.setItem('starlight-theme', newTheme);
+			});
+		}
+	}
+	customElements.define('starlight-theme-toggle', StarlightThemeToggle);
 
-      button?.addEventListener('click', () => {
-        const currentTheme = document.documentElement.dataset.theme;
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+	function restoreTheme() {
+		const savedTheme = localStorage.getItem('starlight-theme');
+		if (savedTheme) {
+			document.documentElement.dataset.theme = savedTheme;
+		}
+	}
+	restoreTheme();
+	document.addEventListener('astro:page-load', restoreTheme);
 
-        // Update the theme
-        document.documentElement.dataset.theme = newTheme;
-        localStorage.setItem('starlight-theme', newTheme);
-      });
-    }
-  }
+	// Version dropdown
+	class BlitzVersionSelect extends HTMLElement {
+		constructor() {
+			super();
+			const trigger = this.querySelector('.version-trigger');
+			const menu = this.querySelector('.version-menu');
+			if (!trigger || !menu) return;
 
-  customElements.define('starlight-theme-toggle', StarlightThemeToggle);
+			// Determine current version from URL
+			const path = window.location.pathname;
+			const items = menu.querySelectorAll('li');
+			items.forEach(li => {
+				const slug = (li as HTMLElement).dataset.slug || '';
+				const isActive = slug === ''
+					? !Array.from(items).some(other => {
+						const s = (other as HTMLElement).dataset.slug || '';
+						return s !== '' && path.startsWith('/' + s + '/');
+					})
+					: path.startsWith('/' + slug + '/');
+				if (isActive) {
+					li.setAttribute('aria-selected', 'true');
+				}
+			});
 
-  // Restore theme on every page navigation (for Astro view transitions)
-  function restoreTheme() {
-    const savedTheme = localStorage.getItem('starlight-theme');
-    if (savedTheme) {
-      document.documentElement.dataset.theme = savedTheme;
-    }
-  }
+			// Toggle menu
+			trigger.addEventListener('click', (e) => {
+				e.stopPropagation();
+				const isOpen = !menu.hidden;
+				menu.hidden = isOpen;
+				this.toggleAttribute('data-open', !isOpen);
+			});
 
-  // Run on initial load
-  restoreTheme();
+			// Select version
+			menu.addEventListener('click', (e) => {
+				const li = (e.target as HTMLElement).closest('li');
+				if (!li) return;
+				const targetSlug = li.dataset.slug || '';
+				this.navigateToVersion(targetSlug, path, items);
+				menu.hidden = true;
+				this.removeAttribute('data-open');
+			});
 
-  // Run on client-side navigation
-  document.addEventListener('astro:page-load', restoreTheme);
+			// Close on outside click
+			document.addEventListener('click', () => {
+				menu.hidden = true;
+				this.removeAttribute('data-open');
+			});
+		}
+
+		navigateToVersion(targetSlug: string, currentPath: string, items: NodeListOf<Element>) {
+			// Strip any existing version prefix from the path
+			let basePath = currentPath;
+			items.forEach(li => {
+				const slug = (li as HTMLElement).dataset.slug || '';
+				if (slug && basePath.startsWith('/' + slug + '/')) {
+					basePath = basePath.slice(('/' + slug).length);
+				}
+			});
+
+			// Build new URL
+			const newPath = targetSlug ? '/' + targetSlug + basePath : basePath;
+			window.location.href = newPath;
+		}
+	}
+	customElements.define('blitz-version-select', BlitzVersionSelect);
 </script>

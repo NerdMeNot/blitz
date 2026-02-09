@@ -18,10 +18,10 @@ Parallelism has overhead: forking tasks, work-stealing, and joining results. The
 | > 10K | Cheap | Yes |
 | > 100K | Any | Definitely |
 
-Use `blitz.internal.shouldParallelize()` for automatic decisions:
+Use a size-based threshold:
 
 ```zig
-if (blitz.internal.shouldParallelize(.transform, data.len)) {
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     blitz.parallelFor(data.len, ctx_type, ctx, bodyFn);
 } else {
     for (data) |*v| v.* = transform(v.*);

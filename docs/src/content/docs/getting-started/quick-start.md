@@ -42,7 +42,9 @@ pub fn main() !void {
 }
 ```
 
-No initialization required. Blitz auto-initializes on first use.
+:::caution
+Call `blitz.init()` before using parallel operations, and `blitz.deinit()` at shutdown. Without initialization, operations fall back to **sequential** execution — they still produce correct results, but without any parallelism. See [Initialization](/usage/initialization/) for details.
+:::
 
 ## The Two APIs
 

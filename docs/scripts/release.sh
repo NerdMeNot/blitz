@@ -2,42 +2,40 @@
 set -euo pipefail
 
 TAG="${1:?Usage: $0 <tag>}"
-PROJECT_NAME="${CLOUDFLARE_PROJECT:-blitz-docs}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DOCS_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(dirname "$DOCS_DIR")"
 
-# Verify tag exists
-git rev-parse "$TAG" >/dev/null 2>&1 || { echo "Error: tag '$TAG' not found in git"; exit 1; }
+echo "=== Docs release: $TAG ==="
+echo ""
 
-# Verify clean working tree
-if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "Error: working tree not clean. Commit or stash changes first."
-    exit 1
+# Step 1: Snapshot current docs under this version
+echo "Step 1/4: Creating docs snapshot for $TAG..."
+(cd "$DOCS_DIR" && bun scripts/snapshot.mjs "$TAG")
+
+# Step 2: Update versions.json
+echo "Step 2/4: Updating version config..."
+(cd "$DOCS_DIR" && bun scripts/update-versions.mjs add "$TAG")
+
+# Step 3: Build site
+echo "Step 3/4: Building Starlight site..."
+(cd "$DOCS_DIR" && bun install && bun run build)
+
+# Copy autodocs into dist if available
+if [ -d "$ROOT_DIR/zig-out/docs/api-reference" ]; then
+    cp -r "$ROOT_DIR/zig-out/docs/api-reference" "$DOCS_DIR/dist/api-reference"
+    echo "  Copied Zig autodocs into dist/"
+else
+    echo "  Skipping autodocs (run 'zig build docs' first if needed)"
 fi
 
-ORIGINAL_BRANCH=$(git symbolic-ref --short HEAD)
-trap 'git checkout --quiet "$ORIGINAL_BRANCH" 2>/dev/null || true' EXIT
-
-echo "=== Building and deploying docs for $TAG ==="
-
-# Step 1: Checkout the tag
-echo "Step 1/4: Checking out $TAG..."
-git checkout --quiet "$TAG"
-
-# Step 2: Build Starlight site
-echo "Step 2/4: Building Starlight site..."
-cd docs && bun install --frozen-lockfile && bun run build && cd ..
-
-# Step 3: Build Zig autodocs
-echo "Step 3/4: Generating Zig autodocs..."
-zig build docs
-cp -r zig-out/docs/api-reference docs/dist/_autodocs
-
-# Step 4: Deploy to Cloudflare Pages
-echo "Step 4/4: Deploying to Cloudflare Pages..."
-cd docs && bunx wrangler pages deploy dist/ --project-name="$PROJECT_NAME" --commit-hash="$(git rev-parse HEAD)" --commit-message="$TAG" && cd ..
-
-# Return to original branch (handled by trap, but be explicit)
-git checkout --quiet "$ORIGINAL_BRANCH"
+# Step 4: Commit snapshot to git
+echo "Step 4/4: Committing snapshot..."
+(cd "$ROOT_DIR" && git add docs/versions.json "docs/src/content/docs/$TAG/" "docs/src/content/versions/$TAG.json")
+if ! git -C "$ROOT_DIR" diff --cached --quiet 2>/dev/null; then
+    (cd "$ROOT_DIR" && git commit -m "docs: snapshot $TAG")
+fi
 
 echo ""
 echo "=== Done ==="
-echo "Docs for $TAG deployed to Cloudflare Pages ($PROJECT_NAME)"
+echo "Snapshot committed. Run 'bun run deploy' to push to Cloudflare Pages."

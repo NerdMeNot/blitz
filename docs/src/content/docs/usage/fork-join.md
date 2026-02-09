@@ -34,7 +34,9 @@ pub fn main() void {
 }
 ```
 
-No explicit initialization required - Blitz auto-initializes on first use.
+:::note
+Remember to call `blitz.init()` before using parallel operations. See [Initialization](/usage/initialization/).
+:::
 
 ## How It Works
 

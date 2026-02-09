@@ -7,6 +7,10 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "clean": "rm -rf dist node_modules/.cache .astro",
+    "release": "./scripts/release.sh",
+    "set-latest": "bun scripts/update-versions.mjs set-latest",
+    "deploy": "bunx wrangler pages deploy dist/ --project-name=${CLOUDFLARE_PROJECT:-blitz}",
     "astro": "astro"
   },
   "dependencies": {

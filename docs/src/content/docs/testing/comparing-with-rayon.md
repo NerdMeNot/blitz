@@ -8,24 +8,34 @@ description: How to benchmark Blitz against Rust's Rayon.
 ### Build Rayon Benchmark
 
 ```bash
-cd core/src/blitz/benchmarks/rayon
+cd benchmarks/rayon
 cargo build --release
 ```
 
 ### Build Blitz Benchmark
 
+The build system handles this automatically:
+
 ```bash
-cd core/src/blitz
-zig build-exe --dep blitz \
-    -Mroot=benchmarks/rayon_compare.zig \
-    -Mblitz=api.zig \
-    -lc -O ReleaseFast \
-    -femit-bin=blitz_bench
+# Build and run the Blitz benchmark
+zig build bench
+
+# Run the comparative benchmark (Blitz vs Rayon side-by-side)
+zig build compare
 ```
+
+The `bench` step compiles `benchmarks/rayon_compare.zig` with `ReleaseFast` optimization and links the `blitz` module. The `compare` step builds `benchmarks/compare.zig` which orchestrates running both benchmarks.
 
 ## Running Comparison
 
-### Run Both Benchmarks
+### Automated
+
+```bash
+# Runs both Blitz and Rayon benchmarks and displays results
+zig build compare
+```
+
+### Manual
 
 ```bash
 # Rayon
@@ -33,15 +43,7 @@ cd benchmarks/rayon
 ./target/release/rayon_bench
 
 # Blitz
-cd ..
-./blitz_bench
-```
-
-### Automated Comparison Script
-
-```bash
-cd core/src/blitz/benchmarks
-./run_comparison.sh
+zig build bench
 ```
 
 ## Benchmark Categories
@@ -64,10 +66,13 @@ fn fork_join_bench(depth: u32) -> u64 {
 
 ```zig
 // Blitz
-fn forkJoinBench(depth: u32) u64 {
-    if (depth == 0) return 1;
-    const results = blitz.join(u64, u64, forkJoinBench, forkJoinBench, depth - 1, depth - 1);
-    return results[0] + results[1];
+fn forkJoinBench(n: u64) u64 {
+    if (n < 20) return fibSequential(n);
+    const r = blitz.join(.{
+        .a = .{ forkJoinBench, n - 1 },
+        .b = .{ forkJoinBench, n - 2 },
+    });
+    return r.a + r.b;
 }
 ```
 
@@ -118,10 +123,10 @@ let result: Vec<_> = data.par_iter()
 ```
 
 ```zig
-// Blitz
-// Currently more explicit
-const positive = try filterPositive(data);
-const doubled = try mapDouble(positive);
+// Blitz - composable iterators
+const result = blitz.iter(i64, data)
+    .filter(isPositive)
+    .map(double);
 ```
 
 ## Results Interpretation
@@ -191,7 +196,7 @@ for (data, 0..) |*v, i| v.* = @intCast(i);
 cargo build --release  # -O3
 
 # Blitz
-zig build-exe ... -O ReleaseFast  # Similar to -O3
+zig build bench  # Uses ReleaseFast (similar to -O3)
 ```
 
 ### 5. Warmup Both

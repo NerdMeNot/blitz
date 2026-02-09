@@ -203,4 +203,4 @@ if (data.len < 10_000) {
 }
 ```
 
-Use `blitz.internal.shouldParallelize(.sum, data.len)` for automatic decision.
+Use `data.len >= blitz.DEFAULT_GRAIN_SIZE` as a simple threshold for the parallel/sequential decision.

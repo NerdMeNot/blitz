@@ -5,11 +5,11 @@ sidebar:
   order: 4
 ---
 
-Low-level utilities and internal modules.
+Low-level utilities and internal modules. These are not part of the public API (`api.zig`) and may change between versions.
 
 ## Threshold Module
 
-`internal/threshold.zig` - Parallelism decision heuristics.
+`internal/threshold.zig` — Parallelism decision heuristics.
 
 ### `OpType` enum
 
@@ -18,60 +18,41 @@ Operation types for threshold calculation:
 ```zig
 pub const OpType = enum {
     // Aggregations
-    sum,
-    min,
-    max,
-    product,
-    mean,
-
+    sum, min, max, product, mean,
     // Arithmetic
-    add,
-    sub,
-    mul,
-    div,
-
+    add, sub, mul, div,
     // Transformations
-    transform,
-    filter,
-    map,
-
+    transform, filter, map,
+    // Misc
+    compare, hash,
     // Complex
-    sort,
-    scan,
-    reduce,
-    find,
+    sort, scan, reduce, find,
 };
 ```
 
 ### `shouldParallelize(op, len) bool`
 
-Determine if parallelization is beneficial.
+Determine if parallelization is beneficial for the given operation and data size.
 
 ```zig
-const internal = blitz.internal;
+const threshold = @import("internal/threshold.zig");
 
-if (internal.shouldParallelize(.sum, data.len)) {
+if (threshold.shouldParallelize(.sum, data.len)) {
     // Use parallel path
 }
 ```
+
+:::note
+This function is not exported via the public `api.zig` module. It's available internally via `blitz.zig` for testing and benchmarking. For application code, use `data.len >= blitz.DEFAULT_GRAIN_SIZE` as a simpler threshold check.
+:::
 
 ### `isMemoryBound(op) bool`
 
 Check if operation is memory-bandwidth limited.
 
-```zig
-if (internal.isMemoryBound(.add)) {
-    // May not scale linearly with cores
-}
-```
-
 ### `getThreshold(op) usize`
 
 Get minimum data size for parallelization.
-
-```zig
-const min_size = internal.getThreshold(.sum);
-```
 
 ### `costPerElement(op) usize`
 
@@ -81,25 +62,30 @@ Approximate cycles per element for operation.
 
 ## Splitter Module
 
-`internal/splitter.zig` - Adaptive work splitting.
+`internal/Splitter.zig` — Adaptive work splitting.
 
 ### `Splitter`
 
-Tracks remaining work splits.
+Adaptive splitter using Rayon-style thief-splitting heuristics.
 
 ```zig
 pub const Splitter = struct {
-    splits: u32,
+    splits: usize,
+    initial_splits: usize,
 
-    pub fn init(num_workers: u32) Splitter;
-    pub fn trySplit(self: *Splitter) bool;
-    pub fn clone(self: *Splitter) Splitter;
+    pub fn init() Splitter;                              // Auto-detects worker count
+    pub fn initWithSplits(splits: usize) Splitter;       // Custom split count
+    pub fn trySplit(self: *Splitter) bool;                // Halves remaining splits
+    pub fn trySplitWithHint(self: *Splitter, migrated: bool) bool;  // Thief-aware
+    pub fn shouldSplit(self: *const Splitter) bool;       // Lookahead (non-consuming)
+    pub fn remaining(self: *const Splitter) usize;
+    pub fn clone(self: *const Splitter) Splitter;
 };
 ```
 
 **Usage:**
 ```zig
-var splitter = Splitter.init(blitz.numWorkers());
+var splitter = Splitter.init();  // Starts with num_workers splits
 
 // In recursive algorithm:
 if (splitter.trySplit()) {
@@ -113,15 +99,21 @@ if (splitter.trySplit()) {
 
 ### `LengthSplitter`
 
-Length-aware splitter for better balance.
+Length-aware splitter that considers both parallelism and data size.
 
 ```zig
 pub const LengthSplitter = struct {
     inner: Splitter,
-    min_length: usize,
+    min_len: usize,
 
-    pub fn init(num_workers: u32, min_len: usize) LengthSplitter;
-    pub fn trySplit(self: *LengthSplitter, current_len: usize) bool;
+    pub const DEFAULT_MIN_LEN: usize = 1;
+    pub const DEFAULT_MAX_LEN: usize = 8192;
+
+    pub fn init(len: usize, min_len: usize, max_len: usize) LengthSplitter;
+    pub fn initDefault(len: usize) LengthSplitter;        // Uses DEFAULT_MIN/MAX_LEN
+    pub fn initWithMin(len: usize, min_len: usize) LengthSplitter;
+    pub fn trySplit(self: *LengthSplitter, len: usize) bool;
+    pub fn trySplitWithHint(self: *LengthSplitter, len: usize, migrated: bool) bool;
 };
 ```
 
@@ -129,7 +121,7 @@ pub const LengthSplitter = struct {
 
 ## RNG Module
 
-`internal/rng.zig` - Fast random number generation.
+`internal/Rng.zig` — Fast random number generation.
 
 ### `XorShift64Star`
 
@@ -140,8 +132,11 @@ pub const XorShift64Star = struct {
     state: u64,
 
     pub fn init(seed: u64) XorShift64Star;
+    pub fn initFromThread() XorShift64Star;          // Per-thread unique seed
+    pub fn initFromIndex(idx: usize) XorShift64Star; // Deterministic per-worker seed
     pub fn next(self: *XorShift64Star) u64;
-    pub fn bounded(self: *XorShift64Star, bound: u64) u64;
+    pub fn nextBounded(self: *XorShift64Star, n: usize) usize;  // [0, n) via Lemire's method
+    pub fn nextExcluding(self: *XorShift64Star, n: usize, exclude: usize) usize;
 };
 ```
 
@@ -150,47 +145,44 @@ pub const XorShift64Star = struct {
 - PDQSort pivot randomization
 - Pattern breaking in sort
 
-**Example:**
-```zig
-var rng = XorShift64Star.init(12345);
-const victim = rng.bounded(num_workers);  // 0 <= victim < num_workers
-```
-
 ---
 
-## Job Module
+## Job (Pool.zig)
 
-`job.zig` - Minimal job representation.
-
-### `Job`
-
-8-byte job structure stored in deque.
+Minimal job struct — the unit of work in the deque.
 
 ```zig
 pub const Job = struct {
-    data: u64,  // Encodes function pointer + state
+    handler: ?*const fn (*Task, *Job) void = null,
 
-    pub fn init(comptime func: anytype, arg: anytype) Job;
-    pub fn execute(self: Job) void;
+    pub inline fn init() Job {
+        return .{};
+    }
 };
 ```
+
+**Size**: 8 bytes (single nullable function pointer).
+
+The handler takes `*Task` (thread-local context) and `*Job` (self pointer, used with `@fieldParentPtr` to navigate to the containing `Future`).
 
 ---
 
 ## Latch Module
 
-`latch.zig` - Synchronization primitives.
+`Latch.zig` — Synchronization primitives.
 
 ### `OnceLatch`
 
-Single-fire latch for one-time synchronization.
+4-state single-fire latch for one-time synchronization.
 
 ```zig
 pub const OnceLatch = struct {
+    // States: UNSET(0) → SLEEPY(1) → SLEEPING(2) → SET(3)
     pub fn init() OnceLatch;
-    pub fn set(self: *OnceLatch) void;
-    pub fn wait(self: *OnceLatch) void;
-    pub fn isSet(self: *OnceLatch) bool;
+    pub fn probe(self: *const OnceLatch) bool;    // Non-blocking check
+    pub fn isDone(self: *const OnceLatch) bool;    // Alias for probe()
+    pub fn setDone(self: *OnceLatch) void;         // Signal completion
+    pub fn wait(self: *OnceLatch) void;            // Block until done
 };
 ```
 
@@ -202,20 +194,25 @@ Countdown latch for waiting on N completions.
 pub const CountLatch = struct {
     pub fn init(count: u32) CountLatch;
     pub fn decrement(self: *CountLatch) void;
+    pub fn isDone(self: *CountLatch) bool;
     pub fn wait(self: *CountLatch) void;
 };
 ```
 
 ### `SpinWait`
 
-Adaptive spinning with backoff.
+Adaptive spinning with exponential backoff.
 
 ```zig
 pub const SpinWait = struct {
-    pub fn init() SpinWait;
+    iteration: u32 = 0,
+
+    const SPIN_LIMIT: u32 = 10;
+    const YIELD_LIMIT: u32 = 20;
+
     pub fn spin(self: *SpinWait) void;
     pub fn reset(self: *SpinWait) void;
-    pub fn shouldYield(self: *SpinWait) bool;
+    pub fn wouldYield(self: *SpinWait) bool;
 };
 ```
 
@@ -223,54 +220,65 @@ pub const SpinWait = struct {
 
 ## Deque Module
 
-`deque.zig` - Chase-Lev work-stealing deque.
+`Deque.zig` — Chase-Lev work-stealing deque.
 
 ### `Deque(T)`
 
-Lock-free double-ended queue.
+Lock-free double-ended queue with cache-line aligned fields.
 
 ```zig
 pub fn Deque(comptime T: type) type {
     return struct {
-        pub fn init(allocator: Allocator) !@This();
+        pub fn init(alloc: Allocator, capacity: usize) !@This();
         pub fn deinit(self: *@This()) void;
 
-        // Owner operations (thread-safe with self only)
+        // Owner operations (single-thread only)
         pub fn push(self: *@This(), item: T) void;
         pub fn pop(self: *@This()) ?T;
 
-        // Thief operations (thread-safe with multiple thieves)
-        pub fn steal(self: *@This()) ?T;
+        // Thief operations (multi-thread safe)
+        pub fn steal(self: *@This()) struct { result: StealResult, item: ?T };
+        pub fn stealLoop(self: *@This()) ?T;  // steal with retry + backoff
 
-        pub fn len(self: *@This()) usize;
-        pub fn isEmpty(self: *@This()) bool;
+        pub fn len(self: *const @This()) usize;
+        pub fn isEmpty(self: *const @This()) bool;
     };
 }
+
+pub const StealResult = enum { empty, success, retry };
 ```
 
 **Guarantees:**
 - `push`/`pop`: Wait-free (owner only)
-- `steal`: Lock-free (may fail under contention)
-- No ABA problem (uses array + indices)
+- `steal`: Lock-free (returns `retry` on contention)
+- `stealLoop`: Lock-free with exponential backoff
+- No ABA problem (uses circular array + monotonic indices)
 
 ---
 
 ## Future Module
 
-`future.zig` - Fork-join with return values.
+`Future.zig` — Stack-allocated fork-join with return values.
 
 ### `Future(Input, Output)`
 
-Typed future for async computation.
+Typed future for parallel computation.
 
 ```zig
 pub fn Future(comptime Input: type, comptime Output: type) type {
     return struct {
+        job: Job,
+        latch: OnceLatch,
+        input: Input,
+        result: Output,
+
         pub fn init() @This();
-        pub fn fork(self: *@This(), task: *Task, func: anytype, input: Input) void;
+        pub fn fork(self: *@This(), task: *Task, comptime func: fn (*Task, Input) Output, input: Input) void;
         pub fn join(self: *@This(), task: *Task) ?Output;
     };
 }
+
+pub const VoidFuture = Future(void, void);
 ```
 
 **Usage:**
@@ -285,9 +293,7 @@ const result = future.join(task) orelse computeFn(task, input);
 
 ---
 
-## Worker Module
-
-`worker.zig` - Worker thread implementation.
+## Worker & Task (Pool.zig)
 
 ### `Worker`
 
@@ -295,24 +301,26 @@ Individual worker with deque and RNG.
 
 ```zig
 pub const Worker = struct {
-    deque: Deque(Job),
-    rng: XorShift64Star,
     pool: *ThreadPool,
+    id: u32,
+    deque: ?Deque(*Job),
+    rng: XorShift64Star,
+    latch: CoreLatch,
+    stats: WorkerStats,
+};
 
-    pub fn run(self: *Worker) void;
-    pub fn steal(self: *Worker) ?Job;
+pub const WorkerStats = struct {
+    jobs_executed: u64 = 0,
+    jobs_stolen: u64 = 0,
 };
 ```
 
 ### `Task`
 
-Context passed to parallel bodies.
+Context passed to job handlers — provides access to the worker and pool.
 
 ```zig
 pub const Task = struct {
     worker: *Worker,
-
-    pub fn tick(self: *Task) void;
-    pub fn call(self: *Task, comptime T: type, func: anytype, arg: anytype) T;
 };
 ```

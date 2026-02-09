@@ -272,10 +272,10 @@ Parallel reduce       4.1 ms     8.6x
 | < 1,000 | Sequential (overhead too high) |
 | > 1,000 | Parallel reduce |
 
-Use threshold heuristics:
+Use a size threshold:
 
 ```zig
-if (blitz.internal.shouldParallelize(.sum, data.len)) {
+if (data.len >= blitz.DEFAULT_GRAIN_SIZE) {
     return parallelReduce(...);
 } else {
     return sequentialReduce(...);

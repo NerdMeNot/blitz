@@ -294,4 +294,4 @@ Blitz uses JEC + condvar because:
 
 1. Rayon sleep implementation: `rayon-core/src/sleep/mod.rs`
 2. Rayon sleep protocol explanation: `rayon-core/src/sleep/README.md`
-3. Blitz implementation: `pool.zig`
+3. Blitz implementation: `Pool.zig` (Sleep struct and JEC protocol are embedded in the pool)

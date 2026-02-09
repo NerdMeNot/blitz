@@ -6,43 +6,58 @@ description: How to run and understand Blitz's test suite.
 ## Quick Start
 
 ```bash
-cd core/src/blitz
+# Run all unit tests
+zig build test
 
-# Run all tests
-zig test api.zig
+# Run stress tests (ReleaseFast)
+zig build test-stress
 
-# Run with verbose output
-zig test api.zig --summary all
+# Run everything (unit + stress)
+zig build test-all
 ```
 
 ## Test Organization
 
-Tests are distributed across modules:
+Tests are distributed across the codebase:
 
 ```
 blitz/
-├── api.zig           # Integration tests
+├── blitz.zig            # Test entry point (imports all modules)
+├── ops/
+│   ├── parallel_for.zig # parallelFor tests
+│   ├── parallel_reduce.zig # parallelReduce tests
+│   ├── collect.zig      # collect/scatter tests
+│   ├── runtime.zig      # init/deinit/config tests
+│   ├── try_join.zig     # tryJoin tests
+│   └── try_ops.zig      # tryForEach/tryReduce tests
 ├── iter/
-│   └── tests.zig     # Iterator tests
-├── sort/
-│   └── tests.zig     # Sorting tests
-├── internal/
-│   └── mod.zig       # Internal utility tests
-└── ...
+│   ├── iter.zig         # Iterator integration tests
+│   ├── Chunks.zig       # Chunk iterator tests
+│   ├── Combinators.zig  # Map/filter tests
+│   ├── Enumerate.zig    # Enumerate tests
+│   ├── Find.zig         # Find/search tests
+│   ├── Mutable.zig      # Mutable iterator tests
+│   └── Range.zig        # Range iterator tests
+├── sort/                # Sorting algorithm tests
+├── internal/            # Internal utility tests
+├── tests/
+│   └── stress.zig       # Stress tests (separate build step)
+├── Pool.zig             # Thread pool tests
+├── Deque.zig            # Chase-Lev deque tests
+├── Future.zig           # Future/fork-join tests
+├── Latch.zig            # Synchronization tests
+└── Scope.zig            # Scope/spawn/broadcast tests
 ```
 
-## Running Specific Test Files
+## Build Steps
 
-```bash
-# Test iterators only
-zig test iter/mod.zig
+The `build.zig` defines three test-related steps:
 
-# Test sorting only
-zig test sort/mod.zig
-
-# Test internal utilities
-zig test internal/mod.zig
-```
+| Command | Step | Description |
+|---------|------|-------------|
+| `zig build test` | `test` | Unit tests via `blitz.zig` (Debug mode) |
+| `zig build test-stress` | `test-stress` | Stress tests via `tests/stress.zig` (ReleaseFast) |
+| `zig build test-all` | `test-all` | Both unit and stress tests |
 
 ## Test Categories
 
@@ -67,10 +82,10 @@ test "parallel sum" {
     try blitz.init();
     defer blitz.deinit();
 
+    const allocator = std.testing.allocator;
     const data = try allocator.alloc(i64, 100_000);
     defer allocator.free(data);
 
-    // Initialize data
     for (data, 0..) |*v, i| v.* = @intCast(i);
 
     const sum = blitz.iter(i64, data).sum();
@@ -81,53 +96,57 @@ test "parallel sum" {
 
 ### Stress Tests
 
-Test under load:
+Test under high contention and large data (run with `zig build test-stress`):
 
 ```zig
-test "concurrent work stealing" {
-    try blitz.init();
+test "parallelSum - 10M elements" {
+    blitz.init() catch {};
     defer blitz.deinit();
 
-    // Spawn many recursive tasks
-    const result = parallelFib(40);
-    try std.testing.expectEqual(@as(u64, 102334155), result);
+    const data = try std.testing.allocator.alloc(i64, 10_000_000);
+    defer std.testing.allocator.free(data);
+
+    for (data, 0..) |*v, i| v.* = @intCast(i);
+    const result = blitz.iter(i64, data).sum();
+    // Verify correctness...
 }
 ```
+
+Stress tests include:
+- Deque concurrent producer-stealer (10K items, 4 stealers)
+- Deque high contention steal (100 items, 8 stealers)
+- Parallel sort, sum, min/max, find, forEach with 10M elements
+- Iterator reduce with 10M elements
+- Recursive join stress (fibonacci)
 
 ## Test Output
 
 ### All Tests Pass
 
 ```
-$ zig test api.zig
-
-1/117 api.test.parallel for basic...OK
-2/117 api.test.parallel reduce sum...OK
-...
-117/117 internal.threshold.test.cost model values...OK
-All 117 tests passed.
+$ zig build test
+All 179 tests passed.
 ```
 
 ### Test Failure
 
 ```
-$ zig test api.zig
+$ zig build test
 
-1/117 api.test.parallel for basic...FAIL
+1/179 ops.test.parallel for basic...FAIL
     Expected 100, found 99
-    /blitz/api.zig:245:5: test failure
 ```
 
 ## Debug Mode
 
-Run tests with debug output:
+Run tests with filtering:
 
 ```bash
-# Enable debug prints
-zig test api.zig -Dlog-level=debug
+# Run single test by name
+zig build test -- --test-filter "parallel for basic"
 
-# Run single test
-zig test api.zig --test-filter "parallel for basic"
+# Run with summary
+zig build test -- --summary all
 ```
 
 ## Memory Safety
@@ -138,13 +157,6 @@ Zig's safety checks are enabled in test mode:
 test "bounds checking" {
     var arr = [_]i32{ 1, 2, 3 };
     _ = arr[5];  // Panic: index out of bounds
-}
-
-test "use after free" {
-    var alloc = std.testing.allocator;
-    const ptr = try alloc.alloc(u8, 100);
-    alloc.free(ptr);
-    _ = ptr[0];  // Panic: use after free
 }
 ```
 
@@ -167,7 +179,7 @@ test "no memory leaks" {
 ## Parallel Test Execution
 
 Zig runs tests sequentially by default. For Blitz, this is intentional because:
-- Tests share global thread pool state
+- Tests share global thread pool state (`init()`/`deinit()` per test)
 - Parallel test execution could cause interference
 
 ## Writing New Tests
@@ -238,10 +250,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0
-      - name: Run tests
-        run: cd core/src/blitz && zig test api.zig
+          version: 0.15.0
+      - name: Run unit tests
+        run: zig build test
+      - name: Run stress tests
+        run: zig build test-stress
 ```

@@ -23,7 +23,7 @@ description: Internal architecture of Blitz, including component interactions, d
                                     |
                                     v
 +-----------------------------------------------------------------------------+
-|                        FORK-JOIN LAYER (future.zig)                          |
+|                        FORK-JOIN LAYER (Future.zig)                          |
 |  - Stack-allocated Future(Input, Output) for fork-join                       |
 |  - Embedded OnceLatch for completion signaling                               |
 |  - Hybrid join: latch-first for stolen, pop-first for local                  |
@@ -32,7 +32,7 @@ description: Internal architecture of Blitz, including component interactions, d
                                     |
                                     v
 +-----------------------------------------------------------------------------+
-|                      SCHEDULER (pool.zig)                                    |
+|                      SCHEDULER (Pool.zig)                                    |
 |  - ThreadPool with Rayon-style JEC (Jobs Event Counter) protocol             |
 |  - AtomicCounters: packed u64 with sleeping/inactive/JEC counters            |
 |  - CoreLatch: 4-state protocol (UNSET->SLEEPY->SLEEPING->SET)                |
@@ -43,16 +43,16 @@ description: Internal architecture of Blitz, including component interactions, d
                                     v
 +-----------------------------------------------------------------------------+
 |                        LOCK-FREE PRIMITIVES                                  |
-|  deque.zig   - Chase-Lev work-stealing deque (wait-free push/pop)           |
-|  latch.zig   - 4-state OnceLatch, CountLatch, SpinWait                      |
-|  job.zig     - Minimal Job struct (8 bytes: handler pointer)                |
-|  sync.zig    - SyncPtr for lock-free parallel writes                        |
+|  Deque.zig   - Chase-Lev work-stealing deque (wait-free push/pop)           |
+|  Latch.zig   - 4-state OnceLatch, CountLatch, SpinWait                     |
+|  Pool.zig    - Job struct (8 bytes: handler pointer) + ThreadPool          |
+|  Sync.zig    - SyncPtr for lock-free parallel writes                       |
 +-----------------------------------------------------------------------------+
 ```
 
 ## Component Details
 
-### ThreadPool (pool.zig)
+### ThreadPool (Pool.zig)
 
 The thread pool manages worker threads and coordinates work distribution using Rayon-style sleep protocol.
 
@@ -99,7 +99,7 @@ ThreadPool
         |   (bottom--, CAS if last)        |
    ```
 
-### Worker (pool.zig)
+### Worker (Pool.zig)
 
 Each worker thread maintains local state for efficient work distribution.
 
@@ -156,7 +156,7 @@ Worker (per thread)
                     +------------------+
 ```
 
-### Future (future.zig)
+### Future (Future.zig)
 
 Stack-allocated futures enable zero-allocation fork-join parallelism.
 
@@ -201,7 +201,7 @@ Total size: ~32-64 bytes (on stack)
    +-------------------------------------------------------------+
 ```
 
-### Chase-Lev Deque (deque.zig)
+### Chase-Lev Deque (Deque.zig)
 
 Lock-free double-ended queue optimized for work-stealing.
 
@@ -246,7 +246,7 @@ pub fn stealLoop(self: *Self) ?T {
 }
 ```
 
-### OnceLatch (latch.zig)
+### OnceLatch (Latch.zig)
 
 4-state latch that prevents missed wakes.
 

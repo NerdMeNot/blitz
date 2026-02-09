@@ -15,7 +15,7 @@ zig build compare
 
 ## Benchmark Suite
 
-The main benchmark compares Blitz against baseline and Rayon:
+The main benchmark compares Blitz against sequential baselines:
 
 ```
 ======================================================================
@@ -34,6 +34,17 @@ Initialized with 10 workers
 +-----------------------+------------+------------+----------+
 ```
 
+## Build Steps
+
+The `build.zig` defines two benchmark steps:
+
+| Command | Description |
+|---------|-------------|
+| `zig build bench` | Run Blitz benchmarks (`benchmarks/rayon_compare.zig`) |
+| `zig build compare` | Run comparative Blitz vs Rayon benchmark (`benchmarks/compare.zig`) |
+
+Both are built with `ReleaseFast` optimization.
+
 ## Writing Benchmarks
 
 ### Basic Benchmark Pattern
@@ -50,7 +61,7 @@ fn benchmarkSum() void {
     for (data, 0..) |*v, i| v.* = @intCast(i);
 
     // Warmup
-    _ = blitz.iter(i64, data).sum(i64, data);
+    _ = blitz.iter(i64, data).sum();
 
     // Benchmark
     const iterations = 10;
@@ -58,7 +69,7 @@ fn benchmarkSum() void {
 
     for (0..iterations) |_| {
         const start = std.time.nanoTimestamp();
-        _ = blitz.iter(i64, data).sum(i64, data);
+        _ = blitz.iter(i64, data).sum();
         total_ns += std.time.nanoTimestamp() - start;
     }
 
@@ -81,7 +92,7 @@ fn benchmarkComparison() void {
 
     // Parallel
     const par_start = std.time.nanoTimestamp();
-    const par_sum = blitz.iter(i64, data).sum(i64, data);
+    const par_sum = blitz.iter(i64, data).sum();
     const par_time = std.time.nanoTimestamp() - par_start;
 
     // Verify correctness
@@ -98,18 +109,16 @@ fn benchmarkComparison() void {
 
 ### 1. Use Release Mode
 
-```bash
-# Always benchmark with optimizations
-zig build-exe ... -O ReleaseFast
+Benchmarks in `build.zig` are always built with `ReleaseFast`. If building manually:
 
-# NOT debug mode
-zig build-exe ... -O Debug  # Much slower!
+```bash
+zig build bench  # Already uses ReleaseFast
 ```
 
 ### 2. Warmup
 
 ```zig
-// Run once to warm caches and trigger JIT
+// Run once to warm caches
 _ = functionToBenchmark();
 
 // Then measure
@@ -259,24 +268,26 @@ fn getResourceUsage() struct { ctx_switches: i64, peak_memory: i64 } {
 | Involuntary ctx switches | < 1000 | > 10000 indicates spinning |
 | Instructions per cycle | > 1.5 | < 0.5 indicates stalls |
 
-### Thread Pool Parameters
+### Sleep Protocol Tuning
 
-Blitz uses progressive sleep (spin -> yield -> sleep) with tunable constants:
+Blitz uses progressive sleep with tunable constants across multiple files:
 
-```zig
-// In pool.zig
-const SPIN_LIMIT: u32 = 32;   // Spin rounds before yielding
-const YIELD_LIMIT: u32 = 64;  // Total rounds before sleeping
+```
+SpinWait (Latch.zig):
+  SPIN_LIMIT = 10    -- Spin iterations before yielding
+  YIELD_LIMIT = 20   -- Total iterations before sleeping
+
+Worker sleep (Pool.zig):
+  ROUNDS_UNTIL_SLEEPY = 32    -- Steal rounds before getting sleepy
+  ROUNDS_UNTIL_SLEEPING = 33  -- Rounds before actual sleep
+
+Future wait (Future.zig):
+  SPIN_LIMIT = 5     -- Spins while waiting for stolen job
 ```
 
 **Trade-offs:**
 - Higher values: Better latency for continuous workloads, more CPU usage
 - Lower values: Better CPU efficiency for bursty workloads, higher wake latency
-
-Current values (32/64) combined with smart wake provide:
-- Excellent performance on continuous workloads (24/26 benchmark wins vs Rayon)
-- Smart wake (`wakeOneIfNeeded`) avoids unnecessary worker wakes
-- Good balance between latency and CPU efficiency
 
 ### Diagnosing Contention
 

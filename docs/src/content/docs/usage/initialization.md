@@ -48,28 +48,40 @@ std.debug.print("Running with {} workers\n", .{workers});
 Control minimum chunk size for parallel operations:
 
 ```zig
-// Get current grain size
+// Get current grain size (default: 65536)
 const current = blitz.getGrainSize();
 
 // Set custom grain size
 blitz.setGrainSize(2048);
 
-// Reset to default (automatic)
-blitz.setGrainSize(blitz.defaultGrainSize);
+// Reset to default
+blitz.setGrainSize(blitz.DEFAULT_GRAIN_SIZE); // 65536
 ```
 
-## Auto-Initialization
+The default grain size (`DEFAULT_GRAIN_SIZE = 65536`) works well for most workloads. Reduce it for expensive per-element operations; increase it for trivial operations.
 
-Many Blitz operations auto-initialize if needed:
+## Initialization is Required
+
+Blitz does **not** auto-initialize. You must call `init()` before using parallel operations:
 
 ```zig
-// This will auto-init if not already initialized
+// Correct usage
+try blitz.init();
+defer blitz.deinit();
 const sum = blitz.iter(i64, data).sum();
+```
 
-// Explicit init is still recommended for:
-// 1. Error handling
-// 2. Custom configuration
-// 3. Predictable startup time
+Calling `initWithConfig()` on an already-initialized pool returns `error.AlreadyInitialized`.
+
+## Pool Statistics
+
+```zig
+// Get execution stats
+const stats = blitz.getStats();
+std.debug.print("Executed: {}, Stolen: {}\n", .{ stats.executed, stats.stolen });
+
+// Reset stats
+blitz.resetStats();
 ```
 
 ## Thread Count Guidelines

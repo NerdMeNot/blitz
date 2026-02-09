@@ -9,7 +9,7 @@ This document provides comprehensive documentation for all Blitz APIs, including
 
 ## Initialization
 
-Blitz uses a global thread pool that auto-initializes on first use. You can also initialize explicitly for custom configuration.
+Blitz uses a global thread pool that must be initialized before use.
 
 ### `init() !void`
 
@@ -20,13 +20,9 @@ try blitz.init();
 defer blitz.deinit();
 ```
 
-**Errors**: Returns error if thread creation fails.
+**Errors**: Returns `error.AlreadyInitialized` if called twice, or thread creation errors.
 
-**Notes**:
-- Safe to call multiple times (no-op if already initialized)
-- Auto-called on first API use if not explicitly initialized
-
-### `initWithConfig(config: Config) !void`
+### `initWithConfig(config: ThreadPoolConfig) !void`
 
 Initialize with custom configuration.
 
@@ -65,7 +61,7 @@ if (!blitz.isInitialized()) {
 }
 ```
 
-### `numWorkers() usize`
+### `numWorkers() u32`
 
 Get the number of worker threads.
 
@@ -667,13 +663,15 @@ Get the current grain size.
 
 #### `defaultGrainSize() usize`
 
-Get the default grain size (4096).
+Get the default grain size (65536).
+
+You can also use the constant `blitz.DEFAULT_GRAIN_SIZE` (65536).
 
 **Guidelines**:
 | Operation Cost | Recommended Grain |
 |----------------|-------------------|
-| Trivial (add, compare) | 4096-10000 |
-| Light (simple math) | 1024-4096 |
+| Trivial (add, compare) | 10000-65536 |
+| Light (simple math) | 1024-10000 |
 | Medium (string ops) | 256-1024 |
 | Heavy (I/O, allocation) | 64-256 |
 

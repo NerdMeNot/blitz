@@ -9,7 +9,7 @@ Blitz brings the ergonomics of Rust's Rayon library to Zig, with a focus on:
 - **Zero-allocation fork-join**: Stack-allocated futures, no heap overhead
 - **Lock-free work stealing**: Chase-Lev deques with Rayon-style JEC protocol
 - **Composable iterators**: Chain, zip, flatten with automatic parallelism
-- **SIMD acceleration**: Vectorized aggregations where applicable
+- **Parallel PDQSort**: Adaptive pattern-defeating quicksort across cores
 
 ```zig
 const blitz = @import("blitz");
@@ -315,9 +315,10 @@ blitz.iter(i64, &data).chunks(100).forEach(processChunk);
 // Enumerate: with indices
 blitz.iter(i64, &data).enumerate().forEach(processWithIndex);
 
-// Flatten: flatten nested slices
+// Flatten: flatten nested slices into output
 const nested = [_][]const i64{ &a, &b };
-const flat_sum = blitz.flatten([]const i64, &nested).sum();  // 21
+var out: [6]i64 = undefined;
+blitz.parallelFlatten([]const i64, &nested, &out);
 ```
 
 ### Fork-Join
@@ -434,21 +435,6 @@ blitz.sortByKey(Person, u32, people, struct {
 - Cache-friendly: good locality of reference
 - Parallel: work-stealing across cores
 
-#### Scan (Prefix Sum)
-
-```zig
-const input = [_]i64{ 1, 2, 3, 4, 5 };
-var output: [5]i64 = undefined;
-
-// Inclusive scan: output[i] = sum of input[0..i+1]
-blitz.parallelScan(i64, &input, &output);
-// output = [1, 3, 6, 10, 15]
-
-// Exclusive scan: output[i] = sum of input[0..i]
-blitz.parallelScanExclusive(i64, &input, &output);
-// output = [0, 1, 3, 6, 10]
-```
-
 #### Find and Partition
 
 ```zig
@@ -467,17 +453,17 @@ const pivot = blitz.parallelPartition(i64, data, isNegative);
 
 #### Initialization
 
-Blitz auto-initializes on first use with default settings. For custom configuration:
+Blitz requires explicit initialization before use:
 
 ```zig
-// Explicit initialization with custom thread count
+// Auto-detect thread count (uses CPU count - 1)
+try blitz.init();
+defer blitz.deinit();
+
+// Or specify custom thread count
 try blitz.initWithConfig(.{
     .background_worker_count = 8,  // Use 8 worker threads
 });
-defer blitz.deinit();
-
-// Or auto-detect (uses CPU count - 1)
-try blitz.init();
 defer blitz.deinit();
 ```
 
@@ -497,7 +483,7 @@ blitz.parallelForWithGrain(n, ctx, body, 512);
 ```
 
 **Guidelines**:
-- Default (4096) works well for most cases
+- Default (65536) works well for most cases
 - Reduce for expensive operations (100-1000)
 - Increase for trivial operations (10000+)
 
@@ -668,14 +654,7 @@ fn badFib(n: u64) u64 {
 
 ## Documentation
 
-Full documentation is available in the `docs/` directory:
-
-- [Getting Started](docs/01-getting-started/) - Installation, quick start, concepts
-- [Usage Guide](docs/02-usage/) - Detailed usage for each feature
-- [API Reference](docs/03-api/) - Complete API documentation
-- [Algorithms](docs/04-algorithms/) - Internal algorithm details
-- [Testing](docs/05-testing/) - Running tests and benchmarks
-- [Internals](docs/06-internals/) - Architecture and implementation details
+Full documentation is available at [blitz.nerdmenot.in](https://blitz.nerdmenot.in) (built from the `docs/` directory using Astro/Starlight).
 
 ## Contributing
 
