@@ -271,9 +271,8 @@ pub const Sleep = struct {
         idle.rounds += 1;
 
         if (idle.rounds < ROUNDS_UNTIL_SLEEPY) {
-            // Yield on every round like Rayon does.
-            // This gives the OS scheduler a chance to run other threads
-            // and prevents the variance seen with pure spin loops.
+            // Yield on every round to give the OS scheduler a chance to run
+            // other threads and prevent the variance seen with pure spin loops.
             std.Thread.yield() catch {};
             return;
         }

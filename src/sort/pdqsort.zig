@@ -1,7 +1,7 @@
 //! Pattern-Defeating Quicksort (PDQSort)
 //!
 //! Core partitioning and recursive sorting implementation.
-//! Based on Orson Peters' PDQSort and Rayon's parallel implementation.
+//! Based on Orson Peters' PDQSort with parallel execution via Blitz fork-join.
 //!
 //! Features:
 //! - BlockQuicksort partitioning with cyclic permutation

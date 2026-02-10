@@ -20,10 +20,9 @@ pub fn FindResult(comptime T: type) type {
 
 /// Find any element satisfying a predicate (parallel with early exit).
 /// Returns any matching element (non-deterministic order for parallel execution).
-/// This is equivalent to Rayon's `find_any`.
 ///
 /// Uses parallelForWithEarlyExit to prune entire subtrees when a match is found,
-/// matching Rayon's consumer.full() pattern for efficient short-circuiting.
+/// enabling efficient short-circuiting across worker threads.
 pub fn findAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T {
     if (data.len == 0) return null;
 
@@ -85,7 +84,6 @@ pub fn findAny(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?T
 
 /// Find the first (leftmost) element satisfying a predicate (deterministic).
 /// Returns the index and value of the first matching element.
-/// This is equivalent to Rayon's `find_first`.
 ///
 /// Note: This uses position-aware early termination. Unlike findAny, threads
 /// processing ranges AFTER a found match are pruned, but threads processing
@@ -163,7 +161,6 @@ pub fn findFirst(comptime T: type, data: []const T, comptime pred: fn (T) bool) 
 
 /// Find the last (rightmost) element satisfying a predicate (deterministic).
 /// Returns the index and value of the last matching element.
-/// This is equivalent to Rayon's `find_last`.
 ///
 /// Note: This uses position-aware early termination. Threads processing ranges
 /// BEFORE a found match are pruned, but threads processing ranges AFTER must
@@ -234,14 +231,12 @@ pub fn findLast(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?
 }
 
 /// Find the index of the first element satisfying a predicate.
-/// This is equivalent to Rayon's `position`.
 pub fn position(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?usize {
     const result = findFirst(T, data, pred);
     return if (result) |r| r.index else null;
 }
 
 /// Find the index of any element satisfying a predicate (non-deterministic).
-/// This is equivalent to Rayon's `position_any`.
 ///
 /// Uses parallelForWithEarlyExit to prune entire subtrees when a match is found.
 /// Returns the index of any matching element, not necessarily the first.
@@ -296,7 +291,6 @@ pub fn positionAny(comptime T: type, data: []const T, comptime pred: fn (T) bool
 }
 
 /// Find the index of the last element satisfying a predicate.
-/// This is equivalent to Rayon's `rposition`.
 pub fn rposition(comptime T: type, data: []const T, comptime pred: fn (T) bool) ?usize {
     const result = findLast(T, data, pred);
     return if (result) |r| r.index else null;

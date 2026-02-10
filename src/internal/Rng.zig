@@ -1,7 +1,7 @@
 //! Fast Per-Thread Random Number Generator for Blitz
 //!
-//! Uses XorShift64* - the same algorithm used by Rayon for victim selection.
-//! This is a high-quality, fast PRNG suitable for work-stealing schedulers.
+//! Uses XorShift64* - a high-quality, fast PRNG suitable for work-stealing
+//! victim selection in parallel schedulers.
 //!
 //! Properties:
 //! - Period: 2^64 - 1
@@ -13,8 +13,8 @@ const std = @import("std");
 
 /// XorShift64* random number generator.
 ///
-/// This is the PRNG used by Rayon for randomized victim selection.
-/// It's fast (3ns per call) and has good statistical properties.
+/// Fast PRNG for randomized victim selection in work-stealing.
+/// ~3ns per call with good statistical properties.
 pub const XorShift64Star = struct {
     state: u64,
 

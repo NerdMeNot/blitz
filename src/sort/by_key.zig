@@ -37,7 +37,7 @@ pub fn sortByKey(
 // ============================================================================
 
 /// Sort by key with parallel key caching.
-/// Two-phase algorithm matching Rayon's `par_sort_by_cached_key`:
+/// Two-phase algorithm:
 /// 1. Compute keys for all elements in parallel
 /// 2. Sort by cached keys (no recomputation during sort)
 ///

@@ -4,7 +4,7 @@
 //! - join: Execute N tasks in parallel with heterogeneous return types
 //! - Supports both comptime and runtime arguments
 //!
-//! This module implements Rayon-style join() semantics.
+//! This module implements work-stealing fork-join semantics.
 
 const std = @import("std");
 const runtime = @import("runtime.zig");
@@ -73,7 +73,7 @@ pub fn join(tasks: anytype) JoinResultType(@TypeOf(tasks)) {
         return results;
     }
 
-    // Fast path for 2 tasks - Rayon-style fork-join
+    // Fast path for 2 tasks - direct fork-join
     // This is the most common case (recursive divide-and-conquer)
     if (fields.len == 2) {
         return join2Fast(TasksType, &tasks);
@@ -102,7 +102,7 @@ pub fn join(tasks: anytype) JoinResultType(@TypeOf(tasks)) {
     return results;
 }
 
-/// Fast path for 2-task join - matches Rayon's optimized implementation.
+/// Fast path for 2-task join - optimized fork-join implementation.
 /// 1. Fork task B (push to deque for potential stealing)
 /// 2. Execute task A inline
 /// 3. Join task B (pop if not stolen, wait if stolen)
@@ -122,7 +122,7 @@ fn join2Fast(comptime TasksType: type, tasks: *const TasksType) JoinResultType(T
         var results: ResultType = undefined;
 
         // Fork task B WITHOUT waking (idle workers actively steal)
-        // This matches Rayon's behavior and avoids overhead at scale
+        // This avoids wake overhead at scale
         var future_b = Future(FutureInput, ReturnB).init();
         future_b.fork(task, struct {
             fn call(_: *Task, input: FutureInput) ReturnB {
@@ -132,7 +132,7 @@ fn join2Fast(comptime TasksType: type, tasks: *const TasksType) JoinResultType(T
             }
         }.call, FutureInput{ .tasks_ptr = tasks, .results_ptr = &results });
 
-        // Execute task A inline (like Rayon does)
+        // Execute task A inline
         executeTaskByIndex(TasksType, tasks, &results, 0);
 
         // Join task B (pop if not stolen, wait and return result if stolen)

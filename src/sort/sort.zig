@@ -11,7 +11,7 @@
 //! - Sort by key with optional caching
 //!
 //! Reference: https://github.com/orlp/pdqsort
-//! Reference: https://github.com/rayon-rs/rayon/blob/main/src/slice/sort.rs
+//! Reference: https://github.com/rayon-rs/rayon/blob/main/src/slice/sort.rs (original implementation)
 
 const pdqsort = @import("pdqsort.zig");
 const stablesort = @import("stablesort.zig");

@@ -1,7 +1,7 @@
-//! High-Level API for Blitz - Rayon-style Work Stealing
+//! High-Level API for Blitz
 //!
 //! This module provides ergonomic parallel primitives built on top of
-//! the lock-free work-stealing runtime (following Rayon's proven design).
+//! the lock-free work-stealing runtime.
 //!
 //! ## API Tiers
 //!

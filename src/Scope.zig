@@ -44,8 +44,8 @@ const TaskFn = *const fn () void;
 ///
 /// Implementation note: This uses a "collect and execute" model where spawned
 /// tasks are collected during the scope body, then executed in parallel when
-/// the scope exits. This is different from Rayon's immediate-spawn model but
-/// provides correct parallel execution semantics.
+/// the scope exits. Tasks are collected during the scope body, then executed
+/// in parallel when the scope exits.
 pub const Scope = struct {
     /// Function pointers for spawned tasks.
     tasks: [MAX_SCOPE_TASKS]TaskFn = undefined,
@@ -175,7 +175,7 @@ pub fn parallelForRangeWithContext(
 }
 
 // ============================================================================
-// Fire-and-Forget Spawn (Rayon-style)
+// Fire-and-Forget Spawn
 // ============================================================================
 
 /// Spawn a fire-and-forget task that runs asynchronously.
@@ -217,8 +217,8 @@ pub fn spawnWithContext(comptime Context: type, context: Context, comptime func:
 // ============================================================================
 
 /// Execute a function on all worker threads in parallel.
-/// Similar to Rayon's broadcast() - useful for thread-local initialization
-/// or operations that need to run on every thread.
+/// Useful for thread-local initialization or operations that need to run
+/// on every thread.
 ///
 /// Usage:
 /// ```zig

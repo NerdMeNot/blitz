@@ -1,6 +1,6 @@
-//! Blitz - Rayon-Style Lock-Free Work-Stealing Parallel Execution Library
+//! Blitz - Lock-Free Work-Stealing Parallel Execution Library
 //!
-//! A high-performance parallel execution library following Rayon's proven design:
+//! A high-performance parallel execution library:
 //! - Lock-free Chase-Lev work-stealing deques
 //! - Zero-allocation fork-join with embedded latches
 //! - Comptime-specialized Future(Input, Output)
@@ -12,7 +12,7 @@
 //! - Deque steal: ~4 ns (lock-free)
 //! - 2M+ recursive forks in 1.4ms
 //!
-//! Key Design Principles (from Rayon):
+//! Key Design Principles:
 //! - Jobs are stack-allocated in the owner's frame
 //! - Chase-Lev deque provides instant visibility to thieves
 //! - Latch embedded in Future eliminates allocation for local execution
@@ -40,7 +40,7 @@
 //!     fn combine(a: f64, b: f64) f64 { return a + b; }
 //! }.combine);
 //!
-//! // Recursive divide-and-conquer (Rayon's strength)
+//! // Recursive divide-and-conquer
 //! fn parallelFib(n: u64) u64 {
 //!     if (n < 20) return sequentialFib(n);
 //!     const r = blitz.join(.{
@@ -127,7 +127,7 @@ pub const isMemoryBound = threshold.isMemoryBound;
 pub const getWorkerCount = numWorkers;
 
 // ============================================================================
-// New Rayon-Parity Features
+// Parallel Iterators, Scopes, and Algorithms
 // ============================================================================
 
 // Parallel iterators (composable iterators)
@@ -164,7 +164,7 @@ pub const parallelFindValue = algorithms.parallelFindValue;
 pub const parallelPartition = algorithms.parallelPartition;
 
 // ============================================================================
-// Convenience Functions (Rayon-style simple API)
+// Convenience Functions
 // ============================================================================
 
 /// Check if any element satisfies the predicate (parallel with early exit).

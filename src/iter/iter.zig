@@ -1,7 +1,6 @@
 //! Parallel Iterators for Blitz
 //!
-//! Provides Rayon-style parallel iterators with composable operations.
-//! Unlike Rayon's trait-based approach, we use Zig's comptime for zero-cost abstractions.
+//! Provides composable parallel iterators using Zig's comptime for zero-cost abstractions.
 //!
 //! Usage:
 //! ```zig
@@ -180,7 +179,6 @@ pub fn ParIter(comptime T: type) type {
         }
 
         /// Find the index of any element satisfying a predicate (non-deterministic).
-        /// This is equivalent to Rayon's `position_any`.
         pub fn positionAny(self: Self, comptime pred: fn (T) bool) ?usize {
             return find.positionAny(T, self.data, pred);
         }

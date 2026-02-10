@@ -1,6 +1,6 @@
 //! Iterator Combinators
 //!
-//! Parallel iterator composition operations inspired by Rayon:
+//! Parallel iterator composition operations:
 //! - chain: Concatenate two iterators
 //! - zip: Pair up elements from two iterators
 //! - flatten: Flatten nested slices

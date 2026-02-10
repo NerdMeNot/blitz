@@ -8,8 +8,7 @@
 //! stack frame (via closures). If we propagate an error without waiting
 //! for all tasks, the stack frame could be invalidated while tasks are still running.
 //!
-//! This mirrors Rayon's panic safety: "No matter what happens, both closures
-//! will always be executed."
+//! No matter what happens, all tasks will always be executed.
 //!
 //! Note on Zig panics: Unlike Rust, Zig panics are terminal and cannot be
 //! caught. This error safety only applies to recoverable errors (error unions).

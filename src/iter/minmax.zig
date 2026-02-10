@@ -2,7 +2,7 @@
 //!
 //! Provides parallel min/max with custom comparators and key functions:
 //! - `minBy`/`maxBy`: Min/max by custom comparator
-//! - `minByKey`/`maxByKey`: Min/max by key function (Rayon-style map-reduce)
+//! - `minByKey`/`maxByKey`: Min/max by key function (parallel map-reduce)
 
 const std = @import("std");
 const api = @import("../api.zig");
@@ -86,8 +86,8 @@ pub fn maxBy(comptime T: type, data: []const T, comptime cmp: fn (T, T) std.math
 /// Find the minimum element by a key function.
 /// Returns the element with the smallest key value.
 ///
-/// Uses Rayon's map-reduce pattern: each parallel chunk computes keys
-/// locally and finds its local minimum, then results are combined.
+/// Uses a parallel map-reduce pattern: each chunk computes keys locally
+/// and finds its local minimum, then results are combined.
 /// Key is computed once per element (not twice per comparison).
 pub fn minByKey(comptime T: type, comptime K: type, data: []const T, comptime key_fn: fn (T) K) ?T {
     if (data.len == 0) return null;
@@ -153,8 +153,8 @@ pub fn minByKey(comptime T: type, comptime K: type, data: []const T, comptime ke
 /// Find the maximum element by a key function.
 /// Returns the element with the largest key value.
 ///
-/// Uses Rayon's map-reduce pattern: each parallel chunk computes keys
-/// locally and finds its local maximum, then results are combined.
+/// Uses a parallel map-reduce pattern: each chunk computes keys locally
+/// and finds its local maximum, then results are combined.
 pub fn maxByKey(comptime T: type, comptime K: type, data: []const T, comptime key_fn: fn (T) K) ?T {
     if (data.len == 0) return null;
 

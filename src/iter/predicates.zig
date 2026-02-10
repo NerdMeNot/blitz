@@ -5,7 +5,7 @@
 //! - `all`: Check if all elements satisfy a predicate
 //!
 //! Uses parallelForWithEarlyExit to prune entire subtrees when a result
-//! is determined, matching Rayon's consumer.full() pattern.
+//! is determined, enabling efficient short-circuiting across worker threads.
 
 const std = @import("std");
 const api = @import("../api.zig");
@@ -13,7 +13,6 @@ const api = @import("../api.zig");
 /// Check if any element satisfies a predicate (parallel with early exit).
 ///
 /// Uses parallelForWithEarlyExit to prune subtrees when a match is found.
-/// This matches Rayon's approach of checking full() before splitting.
 pub fn any(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
     if (data.len == 0) return false;
 
@@ -78,7 +77,7 @@ pub fn any(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
 /// Check if all elements satisfy a predicate (parallel with early exit).
 ///
 /// Uses parallelForWithEarlyExit to prune subtrees when a counter-example is found.
-/// This is equivalent to Rayon's approach: all(p) = !any(!p)
+/// Equivalent to: all(p) = !any(!p)
 pub fn all(comptime T: type, data: []const T, comptime pred: fn (T) bool) bool {
     if (data.len == 0) return true;
 

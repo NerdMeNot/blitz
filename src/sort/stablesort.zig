@@ -1,7 +1,7 @@
 //! Parallel Stable Sort (TimSort-based Merge Sort)
 //!
 //! A stable, parallel sorting algorithm that maintains relative order of equal elements.
-//! Based on Rayon's parallel merge sort which adapts Tim Peters' TimSort.
+//! Parallel merge sort adapted from Tim Peters' TimSort.
 //!
 //! Features:
 //! - Stability: equal elements maintain their original relative order
@@ -12,7 +12,7 @@
 //! Time: O(n log n) worst-case
 //! Space: O(n) temporary buffer
 //!
-//! Reference: https://github.com/rayon-rs/rayon/blob/main/src/slice/sort.rs
+//! Reference: https://github.com/rayon-rs/rayon/blob/main/src/slice/sort.rs (original implementation)
 
 const std = @import("std");
 const blitz = @import("../api.zig");

@@ -1,9 +1,9 @@
 //! Adaptive Splitter for Blitz
 //!
-//! Implements Rayon-style thief-splitting heuristics that automatically
-//! decide when to split work vs execute sequentially.
+//! Implements thief-splitting heuristics that automatically decide when to
+//! split work vs execute sequentially.
 //!
-//! The key insight from Rayon:
+//! Key insight:
 //! - Start with num_threads worth of desired parallelism
 //! - When work is stolen, reset the split counter (thief will keep dividing)
 //! - When not stolen, halve the counter until we run sequentially
@@ -27,9 +27,9 @@ fn getNumWorkers() usize {
 /// Each split halves the remaining count until we reach 0, at which point
 /// we execute sequentially.
 ///
-/// Implements Rayon-style thief-splitting: when work is stolen, the thief
-/// resets its split counter to allow further subdivision. This ensures
-/// stolen work generates enough parallelism for the stealing thread's subtree.
+/// Implements thief-splitting: when work is stolen, the thief resets its
+/// split counter to allow further subdivision. This ensures stolen work
+/// generates enough parallelism for the stealing thread's subtree.
 ///
 /// Usage:
 /// ```zig
@@ -85,7 +85,7 @@ pub const Splitter = struct {
     ///
     /// When `migrated=true`, the work was stolen by another thread. In this case,
     /// we reset the split counter to allow the thief to generate more parallelism
-    /// in its subtree. This is the key optimization from Rayon.
+    /// in its subtree.
     ///
     /// When `migrated=false`, the work is still on the original thread, so we
     /// continue halving as usual.

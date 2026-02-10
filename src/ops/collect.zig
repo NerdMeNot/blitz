@@ -23,7 +23,7 @@ pub const capAndOffsets = sync.capAndOffsets;
 /// Maps each element of `input` through `map_fn` and stores the result
 /// in `output`. Work is divided and stolen using the standard fork-join pattern.
 ///
-/// This is equivalent to Rayon's `.par_iter().map().collect()`.
+/// Parallel map-collect: transforms each element and stores the result.
 ///
 /// Requirements:
 /// - `output.len` must equal `input.len`
