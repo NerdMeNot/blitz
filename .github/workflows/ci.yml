@@ -27,10 +27,10 @@ jobs:
           version: ${{ steps.zig-version.outputs.version }}
 
       - name: Check formatting
-        run: zig fmt --check *.zig sort/*.zig iter/*.zig internal/*.zig simd/*.zig
+        run: zig fmt --check src/*.zig src/sort/*.zig src/iter/*.zig src/internal/*.zig src/ops/*.zig
 
       - name: Run tests
-        run: zig test blitz.zig -lc
+        run: zig build test
 
       - name: Build
         run: zig build
@@ -56,10 +56,10 @@ jobs:
           sudo apt-get install -y kcov
 
       - name: Build test binary
-        run: zig test blitz.zig -lc --test-no-exec -femit-bin=zig-test
+        run: zig test src/blitz.zig -lc --test-no-exec -femit-bin=zig-test
 
       - name: Run coverage
-        run: kcov --include-path=. coverage ./zig-test
+        run: kcov --include-path=src coverage ./zig-test
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
