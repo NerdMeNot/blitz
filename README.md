@@ -1,9 +1,19 @@
-# Blitz: High-Performance Parallel Runtime for Zig
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.png">
+    <img alt="blitz" src="assets/logo-light.png" height="80">
+  </picture>
+</p>
 
-[![CI](https://github.com/NerdMeNot/blitz/actions/workflows/ci.yml/badge.svg)](https://github.com/NerdMeNot/blitz/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+<p align="center">
+  <strong>Rayon-style parallelism for Zig. Simple API, serious performance.</strong>
+</p>
 
-**Rayon-style parallelism for Zig. Simple API, serious performance.**
+<p align="center">
+  <a href="https://github.com/NerdMeNot/blitz/actions/workflows/ci.yml"><img src="https://github.com/NerdMeNot/blitz/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+</p>
 
 Blitz brings the ergonomics of Rust's Rayon library to Zig, with a focus on:
 - **Zero-allocation fork-join**: Stack-allocated futures, no heap overhead

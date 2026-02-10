@@ -31,6 +31,11 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Blitz',
+			logo: {
+				light: './public/logo-light.png',
+				dark: './public/logo-dark.png',
+				replacesTitle: true,
+			},
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/NerdMeNot/blitz' },
 			],

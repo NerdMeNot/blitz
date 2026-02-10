@@ -29,16 +29,17 @@ bun run deploy         # push dist/ to Cloudflare Pages
 
 ## Structure
 
-- `api.zig` — public API (re-exports from `ops/`)
-- `blitz.zig` — library root / test entry point
-- `Pool.zig` → `Future.zig` → `Latch.zig` → `Deque.zig` — core chain
-- `Scope.zig` — scope-based parallelism
-- `Sync.zig` — lock-free parallel writes
-- `algorithms.zig` — parallel sort, scan, find
-- `ops/` — API operation implementations
-- `iter/` — parallel iterators
-- `sort/` — parallel PDQSort
-- `internal/` — utilities (threshold, splitter, rng)
+- `src/` — all library source code
+  - `api.zig` — public API (re-exports from `ops/`)
+  - `blitz.zig` — library root / test entry point
+  - `Pool.zig` → `Future.zig` → `Latch.zig` → `Deque.zig` — core chain
+  - `Scope.zig` — scope-based parallelism
+  - `Sync.zig` — lock-free parallel writes
+  - `algorithms.zig` — parallel sort, scan, find
+  - `ops/` — API operation implementations
+  - `iter/` — parallel iterators
+  - `sort/` — parallel PDQSort
+  - `internal/` — utilities (threshold, splitter, rng)
 - `examples/`, `benchmarks/`, `tests/`
 - `docs/` — Astro/Starlight site (bun)
 

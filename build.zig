@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     // Blitz Module (for downstream users)
     // ========================================================================
     const blitz_mod = b.addModule("blitz", .{
-        .root_source_file = b.path("api.zig"),
+        .root_source_file = b.path("src/api.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     // Unit Tests
     // ========================================================================
     const test_mod = b.createModule(.{
-        .root_source_file = b.path("blitz.zig"),
+        .root_source_file = b.path("src/blitz.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) void {
     // Stress Tests (ReleaseFast for realistic performance)
     // ========================================================================
     const blitz_test_mod = b.createModule(.{
-        .root_source_file = b.path("blitz.zig"),
+        .root_source_file = b.path("src/blitz.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -127,7 +127,7 @@ pub fn build(b: *std.Build) void {
     // API Documentation (Zig Autodocs)
     // ========================================================================
     const docs_mod = b.createModule(.{
-        .root_source_file = b.path("api.zig"),
+        .root_source_file = b.path("src/api.zig"),
         .target = target,
         .optimize = .Debug,
     });
